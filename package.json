@@ -1,0 +1,14 @@
+{
+  "name": "slack-attendance-logger",
+  "version": "1.0.0",
+  "description": "Slack #출퇴근 채널 메시지를 실시간 수집하여 Google Sheets에 기록하는 독립 프로그램 (GitHub Actions 전용)",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0",
+    "node-fetch": "^3.3.2"
+  }
+}

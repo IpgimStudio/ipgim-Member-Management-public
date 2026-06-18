@@ -1,0 +1,62 @@
+# Dependencies
+# pnpm 및 각 프로젝트의 의존성 폴더 제외
+node_modules/
+.pnpm-debug.log*
+
+# Build Outputs
+# Vite 및 서버 빌드 결과물
+client/dist/
+client/dist-ssr/
+server/dist/
+*.com
+*.out
+*.app
+
+# Environment Variables
+# 보안이 필요한 설정 파일 (절대 커밋 금지)
+.env
+.env.local
+.env.*.local
+server_config.json
+
+# Local Database
+# SQLite 데이터베이스 파일 및 임시 파일
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+
+# Logs
+# 디버깅용 로그 파일
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE & OS Files
+# 작업 환경 설정 파일들
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Vite & Tooling
+# 캐시 및 임시 파일
+client/.vite/
+.eslintcache
+.stylelintcache
+
+# Python / Binary (Puppeteer 등 사용 시 발생 가능)
+__pycache__/
+*.py[cod]
+
+# Sample Data
+# 마켓 HTML 샘플 파일 (큰 용량, 재생산 가능)
+data/
