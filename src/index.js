@@ -1,89 +1,77 @@
-/**
- * slack-attendance-logger
- * =======================
- * Slack #출퇴근 채널 메시지를 수집 → 파싱 → Google Sheets 기록
- * GitHub Actions에서 10분마다 실행되는 stateless 배치 프로그램
- *
- * [Slack API Research Summary]
- * - Internal App + Pro Plan → 2025년 conversations.history 제한(1rpm/15msg) 대상 아님
- * - Tier 3: 50+ req/min 충분히 확보
- * - chat.postMessage: 채널당 ~1msg/sec
- * - Socket Mode 불필요 (GA는 stateless)
- */
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { google } from 'googleapis';
+import fetch from 'node-fetch';
 
-// ============================================================
-// 환경변수 (모두 GitHub Actions Secrets → env)
-// ============================================================
+// ─────────────────── 환경설정 ───────────────────
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const REQUIRED_ENV = [
-  'SLACK_BOT_TOKEN',      // xoxb-... Slack Bot User OAuth Token
-  'SLACK_CHANNEL_ID',     // #출퇴근 채널 ID (예: C123456)
-  'GOOGLE_SERVICE_EMAIL', // Google Service Account email
-  'GOOGLE_PRIVATE_KEY',   // Google Service Account private key
-  'SHEET_ID',             // Google Sheets ID (스프레드시트 ID)
-];
+const CONFIG_FILE = path.resolve(__dirname, './config.json');
+let CONFIG = {};
 
-for (const key of REQUIRED_ENV) {
-  if (!process.env[key]) {
-    console.error(`[FATAL] 환경변수 누락: ${key}`);
-    process.exit(1);
-  }
+if (fs.existsSync(CONFIG_FILE)) {
+  CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  console.log('[CONFIG] 파일 로드 완료');
 }
 
-// ============================================================
-// Imports
-// ============================================================
+// 환경변수 우선 (GitHub Actions)
+if (process.env.SLACK_BOT_TOKEN) CONFIG.slack = CONFIG.slack || {};
+if (process.env.SLACK_BOT_TOKEN) CONFIG.slack.token = process.env.SLACK_BOT_TOKEN;
+if (process.env.SLACK_CHANNEL_ID) CONFIG.slack = CONFIG.slack || {};
+if (process.env.SLACK_CHANNEL_ID) CONFIG.slack.channelId = process.env.SLACK_CHANNEL_ID;
+if (process.env.SHEET_ID) CONFIG.sheets = CONFIG.sheets || {};
+if (process.env.SHEET_ID) CONFIG.sheets.sheetId = process.env.SHEET_ID;
+if (process.env.GOOGLE_SERVICE_EMAIL) CONFIG.sheets = CONFIG.sheets || {};
+if (process.env.GOOGLE_SERVICE_EMAIL) CONFIG.sheets.serviceEmail = process.env.GOOGLE_SERVICE_EMAIL;
+if (process.env.GOOGLE_PRIVATE_KEY) {
+  CONFIG.sheets = CONFIG.sheets || {};
+  CONFIG.sheets.privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
+}
 
-import fetch from 'node-fetch';
-import { google } from 'googleapis';
+// 시트 이름
+if (!CONFIG.sheets) CONFIG.sheets = {};
+if (!CONFIG.sheets.sheetNames) {
+  CONFIG.sheets.sheetNames = {
+    attendance: '출퇴근기록',
+  };
+}
 
-// ============================================================
-// Configuration
-// ============================================================
+// ─────────────────── 타임 포맷 ───────────────────
+function parseTimeString(str) {
+  if (!str) return null;
+  const [hour, min] = str.split(':').map(Number);
+  return { hour, minute: min };
+}
 
-const CONFIG = {
-  slack: {
-    token: process.env.SLACK_BOT_TOKEN,
-    channelId: process.env.SLACK_CHANNEL_ID,
-    // 출퇴근 채널에서 캡처할 시계열 범위 (분)
-    lookbackMinutes: parseInt(process.env.LOOKBACK_MINUTES || '30', 10),
-  },
-  sheets: {
-    id: process.env.SHEET_ID,
-    // 시트 이름들
-    sheetNames: {
-      attendance: '출퇴근기록',
-      leave: '연월차현황',
-      summary: '월별통계',
-    },
-  },
-  // 근무 유형별 지각 기준 (분)
-  lateThresholds: {
-    flexible: { startMax: 11 * 60 }, // 11:00 = 660분 (08시 이후 출근 허용)
-    fixed: { startMax: 9 * 60 + 10 }, // 09:10 (09:00 + 10분 예외)
-  },
-  // 표준 근무 시간 (분)
-  standardWorkMinutes: 9 * 60, // 9시간
-  halfVacationMinutes: 4 * 60, // 반차 = 4시간
-};
+function formatTimeDisplay(ts) {
+  const d = new Date(ts * 1000);
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const hour = kst.getUTCHours();
+  const minute = kst.getUTCMinutes();
+  const ampm = hour < 12 ? '오전' : '오후';
+  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  return `${ampm} ${h12}:${String(minute).padStart(2, '0')}`;
+}
 
-// ============================================================
-// Slack API Client
-// ============================================================
-
+// ─────────────────── Slack ───────────────────
 class SlackClient {
   constructor(token) {
     this.token = token;
-    this.baseUrl = 'https://slack.com/api';
   }
 
   async call(method, params = {}) {
-    const url = new URL(`${this.baseUrl}/${method}`);
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${this.token}` } });
+    const url = `https://slack.com/api/${method}`;
+    const body = new URLSearchParams(params);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+    });
     const data = await res.json();
-
     if (!data.ok) {
       throw new Error(`Slack API 오류 [${method}]: ${data.error}`);
     }
@@ -91,20 +79,29 @@ class SlackClient {
   }
 
   /**
-   * 특정 채널의 메시지 이력을 조회 (가장 최근 N분)
-   * API Research: conversations.history (Tier 3, 50+ req/min)
+   * 특정 채널의 메시지 이력을 oldest ts 기준으로 조회 (페이지네이션, 최대 1000개)
+   * API Research: conversations.history (Tier 3, 50+ req/min, max 1000/page)
    */
-  async fetchRecentMessages(channelId, lookbackMinutes) {
-    const oldest = Math.floor(Date.now() / 1000) - lookbackMinutes * 60;
+  async fetchMessagesSince(channelId, oldestTs) {
+    const allMessages = [];
+    let cursor;
 
-    const result = await this.call('conversations.history', {
-      channel: channelId,
-      oldest,
-      limit: 100,
-    });
+    do {
+      const params = {
+        channel: channelId,
+        oldest: oldestTs,
+        limit: 200,
+      };
+      if (cursor) params.cursor = cursor;
 
-    console.log(`[Slack] ${result.messages.length}개 메시지 수신 (과거 ${lookbackMinutes}분)`);
-    return result.messages;
+      const result = await this.call('conversations.history', params);
+      allMessages.push(...result.messages);
+
+      cursor = result.response_metadata?.next_cursor;
+    } while (cursor);
+
+    console.log(`[Slack] 총 ${allMessages.length}개 메시지 수신 (oldest=${oldestTs})`);
+    return allMessages;
   }
 
   /**
@@ -113,247 +110,39 @@ class SlackClient {
   async getChannelInfo(channelId) {
     return this.call('conversations.info', { channel: channelId });
   }
-
-  async getUserInfo(userId) {
-    return this.call('users.info', { user: userId });
-  }
 }
 
-// ============================================================
-// Message Parser — Slack 메시지 → Attendance Record
-// ============================================================
-
-/**
- * 메시지 예시:
- *   "김혜경  [오전 8:23]"
- *   ↓ (다음 메시지)
- *   "출근했습니다"
- *
- *   "정호용(6/18 오후반차)  [오전 8:38]"
- *   ↓
- *   "출근했습니다"
- *
- *   "이용준  [오후 6:00]"
- *   ↓
- *   "퇴근하겠습니다"
- *
- * 위 예시는 한 사람이 2개의 메시지를 연속으로 보내는 패턴.
- * 실제로는 아래의 패턴도 가능:
- *   단일 메시지: "출근했습니다  [오전 8:23]"
- *
- * 현재 관측된 패턴을 기준으로 파싱:
- *   Message #1: "이름  [오전/오후 H:MM]"  — 타임스탬프 인사
- *   Message #2: "출근했습니다" / "퇴근하겠습니다"
- *
- * 혹은 같은 메시지에 시간과 출근선언이 함께 있는 경우도 처리
- */
-
-const TIME_REGEX = /\[(오전|오후)\s*(\d{1,2}):(\d{2})\]/;
-const NAME_REGEX = /^([가-힣a-zA-Z]{2,10})/;
-const NOTE_REGEX = /\((.*?)\)/; // 괄호 안 메모
-const CHECK_IN_KEYWORDS = ['출근했습니다', '출근', '업무시작'];
-const CHECK_OUT_KEYWORDS = ['퇴근하겠습니다', '퇴근', '업무종료'];
-
-/**
- * "[오전 8:23]" → { hour: 8, minute: 23, isPM: false }
- */
-function parseTimeTag(text) {
-  const match = text.match(TIME_REGEX);
-  if (!match) return null;
-  const [, period, hourStr, minStr] = match;
-  let hour = parseInt(hourStr, 10);
-  const minute = parseInt(minStr, 10);
-  if (period === '오후' && hour !== 12) hour += 12;
-  if (period === '오전' && hour === 12) hour = 0;
-  return { hour, minute, totalMinutes: hour * 60 + minute };
-}
-
-/**
- * "정호용(6/18 오후반차)" → { name: "정호용", note: "6/18 오후반차" }
- */
-function parseNameAndNote(text) {
-  const nameMatch = text.match(NAME_REGEX);
-  const noteMatch = text.match(NOTE_REGEX);
-  return {
-    name: nameMatch ? nameMatch[1].trim() : null,
-    note: noteMatch ? noteMatch[1].trim() : null,
-  };
-}
-
-/**
- * 메시지가 어떤 유형인지 판별
- */
-function classifyMessage(text) {
-  const lower = text.toLowerCase();
-  for (const kw of CHECK_IN_KEYWORDS) {
-    if (lower.includes(kw)) return 'check-in';
-  }
-  for (const kw of CHECK_OUT_KEYWORDS) {
-    if (lower.includes(kw)) return 'check-out';
-  }
-  return 'info'; // 시간표시 메시지 등
-}
-
-/**
- * 전체 메시지 목록을 순회하며 출퇴근 레코드로 파싱
- *
- * 파싱 전략 (관측된 패턴 기반):
- *   [이름+시간] 메시지와 [출근/퇴근 선언] 메시지가 쌍으로 나타남.
- *   동일 사용자의 연속 메시지를 하나의 레코드로 결합.
- */
-function parseMessages(messages) {
-  const records = [];
-  let pending = null; // { name, note, time, ts, user }
-
-  for (const msg of messages) {
-    const text = msg.text || '';
-    const type = classifyMessage(text);
-    const timeTag = parseTimeTag(text);
-    const { name, note } = parseNameAndNote(text);
-
-    // 시간 태그가 있는 메시지 = 새로운 pending 생성
-    if (timeTag) {
-      // 이전 pending 미완료 시 폐기
-      if (pending) {
-        console.warn(`[WARN] 미완료 pending 폐기: ${pending.name} (${pending.ts})`);
-      }
-      pending = {
-        name: name || msg.user,
-        note: note,
-        time: timeTag,
-        ts: msg.ts,
-        user: msg.user,
-      };
-      continue;
-    }
-
-    // 출근/퇴근 선언 메시지
-    if (type === 'check-in' || type === 'check-out') {
-      // 바로 직전 pending이 있다면 결합
-      // (같은 사용자가 연속으로 보낸 메시지라고 가정)
-      if (pending) {
-        records.push({
-          name: pending.name,
-          note: pending.note,
-          timestamp: pending.time,
-          type,
-          slackTs: msg.ts,
-          rawTimeText: text,
-        });
-        pending = null;
-      } else {
-        // pending 없이 "출근했습니다"만 온 경우 → 메시지 자체의 ts로 시간 추정
-        const fallbackTime = new Date(parseFloat(msg.ts) * 1000);
-        records.push({
-          name: name || msg.user,
-          note,
-          timestamp: {
-            hour: fallbackTime.getHours(),
-            minute: fallbackTime.getMinutes(),
-            totalMinutes: fallbackTime.getHours() * 60 + fallbackTime.getMinutes(),
-          },
-          type,
-          slackTs: msg.ts,
-          rawTimeText: text,
-        });
-      }
-    }
-  }
-
-  return records;
-}
-
-// ============================================================
-// Attendance Record → 다양한 상태 판정
-// ============================================================
-
-/**
- * 근무 유형 판별 (유연근무제 vs 고정근무제)
- * TODO: 사용자별 설정을 DB나 시트에서 읽어오는 것으로 확장 가능
- * 현재는 일괄 유연근무제 가정 (계획서 기준 대부분 유연)
- */
-function determineWorkType(name) {
-  // 고정근무 예외 처리 (계획서 reference)
-  const fixedWorkUsers = []; // 필요시 명단 추가
-  return fixedWorkUsers.includes(name) ? 'fixed' : 'flexible';
-}
-
-/**
- * 출근 시간 기준 지각 판정
- */
-function determineAttendanceStatus(record, workType) {
-  const minutes = record.timestamp.totalMinutes;
-  const threshold = CONFIG.lateThresholds[workType].startMax;
-
-  if (record.type === 'check-in') {
-    // 오전 4시 이전 기록은 전날 심야근무로 간주
-    if (minutes < 4 * 60) return '야근익일';
-    if (minutes <= threshold) return '정상';
-    return '지각';
-  }
-
-  // check-out (퇴근)
-  return '정상';
-}
-
-function formatTimeDisplay(timestamp) {
-  const h = timestamp.hour;
-  const m = String(timestamp.minute).padStart(2, '0');
-  const period = h < 12 ? '오전' : '오후';
-  const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${period} ${displayHour}:${m}`;
-}
-
-// ============================================================
-// Google Sheets Client
-// ============================================================
-
+// ─────────────────── Google Sheets ───────────────────
 class SheetsClient {
   constructor() {
-    const auth = new google.auth.JWT({
-      email: process.env.GOOGLE_SERVICE_EMAIL,
-      key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
+    const auth = new google.auth.JWT(
+      CONFIG.sheets.serviceEmail,
+      null,
+      CONFIG.sheets.privateKey,
+      ['https://www.googleapis.com/auth/spreadsheets'],
+    );
     this.sheets = google.sheets({ version: 'v4', auth });
-    this.sheetId = process.env.SHEET_ID;
+    this.sheetId = CONFIG.sheets.sheetId;
   }
 
   /**
-   * 시트 존재 확인, 없으면 생성
+   * 시트가 없으면 생성
    */
   async ensureSheet(sheetName, headerRow) {
     try {
-      const res = await this.sheets.spreadsheets.get({ spreadsheetId: this.sheetId });
-      const existing = res.data.sheets.map(s => s.properties.title);
-      if (!existing.includes(sheetName)) {
-        await this.sheets.spreadsheets.batchUpdate({
-          spreadsheetId: this.sheetId,
-          requestBody: {
-            requests: [{
-              addSheet: { properties: { title: sheetName } },
-            }],
-          },
-        });
-        // 헤더 쓰기
-        await this.sheets.spreadsheets.values.update({
-          spreadsheetId: this.sheetId,
-          range: `'${sheetName}'!A1`,
-          valueInputOption: 'RAW',
-          requestBody: { values: [headerRow] },
-        });
-        console.log(`[Sheets] 시트 생성: ${sheetName}`);
-      }
-    } catch (err) {
-      // 시트가 없음 → 생성
+      const res = await this.sheets.spreadsheets.get({
+        spreadsheetId: this.sheetId,
+      });
+      const exists = res.data.sheets.some(s => s.properties.title === sheetName);
+      if (exists) return;
+
       await this.sheets.spreadsheets.batchUpdate({
         spreadsheetId: this.sheetId,
         requestBody: {
-          requests: [{
-            addSheet: { properties: { title: sheetName } },
-          }],
+          requests: [{ addSheet: { properties: { title: sheetName } } }],
         },
       });
+      // 헤더写入
       await this.sheets.spreadsheets.values.update({
         spreadsheetId: this.sheetId,
         range: `'${sheetName}'!A1`,
@@ -361,7 +150,25 @@ class SheetsClient {
         requestBody: { values: [headerRow] },
       });
       console.log(`[Sheets] 시트 생성: ${sheetName}`);
+    } catch (err) {
+      console.error(`[Sheets] ensureSheet 오류:`, err.message);
     }
+  }
+
+  /**
+   * 시트에서 가장 최근 slack_ts(소수점 Unix timestamp) 찾기
+   * 없으면 null 반환 (최초 실행 시)
+   */
+  getLatestSlackTs(rows) {
+    if (!rows || rows.length < 2) return null; // 헤더만 있거나 빈 시트
+    let latest = null;
+    for (let i = 1; i < rows.length; i++) {
+      const tsStr = rows[i][9]; // J열 = slack_ts
+      if (!tsStr) continue;
+      const ts = parseFloat(tsStr);
+      if (latest === null || ts > latest) latest = ts;
+    }
+    return latest;
   }
 
   /**
@@ -371,7 +178,7 @@ class SheetsClient {
     try {
       const res = await this.sheets.spreadsheets.values.get({
         spreadsheetId: this.sheetId,
-        range: `'${sheetName}'!A:G`,
+        range: `'${sheetName}'!A:K`,
       });
       return res.data.values || [];
     } catch {
@@ -388,12 +195,11 @@ class SheetsClient {
       return;
     }
 
-    // 중복 검사: 기존 데이터의 slack_ts(column G)와 비교
+    // 중복 검사: 기존 데이터의 slack_ts(column J)와 비교
     const existingTsSet = new Set();
     if (existingRows && existingRows.length > 1) {
-      // header skip
       for (let i = 1; i < existingRows.length; i++) {
-        const ts = existingRows[i][6]; // G열 = slack_ts
+        const ts = existingRows[i][9]; // J열 = slack_ts
         if (ts) existingTsSet.add(ts);
       }
     }
@@ -404,6 +210,7 @@ class SheetsClient {
       return;
     }
 
+    // A:날짜 B:이름 C:출근 D:퇴근 E:근무유형 F:상태 G:연장 H:연장시간(분) I:비고 J:slack_ts K:출처
     const values = toAppend.map(r => [
       r.date,               // A: 날짜
       r.name,               // B: 이름
@@ -411,13 +218,16 @@ class SheetsClient {
       r.type === 'check-out' ? formatTimeDisplay(r.timestamp) : '', // D: 퇴근시간
       r.workType === 'flexible' ? '유연' : '고정',                  // E: 근무유형
       r.status,             // F: 상태
-      r.note || '',         // G: 비고
-      r.slackTs,            // H: Slack TS (중복방지용, 숨김가능)
+      '',                   // G: 연장 (서버 sheets-db에서 관리)
+      '',                   // H: 연장시간(분) (서버 sheets-db에서 관리)
+      r.note || '',         // I: 비고
+      r.slackTs,            // J: Slack TS (중복방지용)
+      'slack-logger',       // K: 출처
     ]);
 
     await this.sheets.spreadsheets.values.append({
       spreadsheetId: this.sheetId,
-      range: `'${sheetName}'!A:H`,
+      range: `'${sheetName}'!A:K`,
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values },
@@ -427,10 +237,58 @@ class SheetsClient {
   }
 }
 
-// ============================================================
-// Main Routine
-// ============================================================
+// ─────────────────── 파싱 ───────────────────
+function parseAttendanceMessage(msg, today) {
+  const result = {
+    slackTs: msg.ts,
+    user: msg.user,
+    text: msg.text || '',
+    timestamp: parseFloat(msg.ts),
+    date: today,
+    type: null,
+    name: '',
+    workType: 'fixed',
+    status: '정상',
+    note: '',
+  };
 
+  const text = msg.text?.trim() || '';
+
+  const patterns = [
+    // "이름 출근" or "이름 퇴근"
+    /^(.+?)\s+(출근|퇴근|퇴군)\s*$/,
+    /^(.+?)\s+(출근|퇴근|퇴군)\s+(.+)$/,
+    // "이름 출근/퇴근"
+    /^(.+?)\s+(출근|퇴근|퇴군)\s*[(\/]\s*(.+?)\s*[)]?$/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      result.name = match[1].trim();
+      const typeRaw = match[2];
+      result.type = typeRaw === '출근' ? 'check-in' : 'check-out';
+      if (match[3]) {
+        const rest = match[3].trim();
+        // 근무유형: 유연/고정
+        if (rest.includes('유연')) result.workType = 'flexible';
+        // 상태: 지각/시간외/조퇴/결근
+        const statusMap = { 지각: '지각', 시간외: '시간외', 조퇴: '조퇴', 결근: '결근' };
+        for (const [k, v] of Object.entries(statusMap)) {
+          if (rest.includes(k)) { result.status = v; break; }
+        }
+        // 비고: 괄호 안 내용
+        const noteMatch = rest.match(/[\(（](.+?)[\)）]/);
+        if (noteMatch) result.note = noteMatch[1];
+      }
+      return result;
+    }
+  }
+
+  return null;
+}
+
+// ─────────────────── 메인 ───────────────────
 async function main() {
   console.log('========================================');
   console.log('  Slack 출퇴근 로거 v1.0 실행');
@@ -440,59 +298,66 @@ async function main() {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   console.log(`[TIME] 실행: ${now.toISOString()}`);
 
-  // 1. Slack 메시지 수집
+  // 1. 시트에서 마지막 수집 지점 확인
+  console.log(`\n--- 마지막 수집 지점 확인 ---`);
+  const sheets = new SheetsClient();
+
+  const headerRow = ['날짜', '이름', '출근시간', '퇴근시간', '근무유형', '상태', '연장', '연장시간(분)', '비고', 'slack_ts', '출처'];
+  const sheetName = CONFIG.sheets.sheetNames.attendance;
+
+  await sheets.ensureSheet(sheetName, headerRow);
+
+  const existingRows = await sheets.readAll(sheetName);
+  const lastTs = sheets.getLatestSlackTs(existingRows);
+  console.log(`[Sheets] 기존 데이터 ${existingRows.length > 0 ? existingRows.length - 1 : 0}행`);
+  console.log(`[Sheets] 마지막 slack_ts: ${lastTs ?? '없음 (최초 수집)'}`);
+
+  // 2. Slack 메시지 수집 — 마지막 수집 시점 이후부터
   const slack = new SlackClient(CONFIG.slack.token);
   console.log(`\n--- Slack 채널 메시지 수집 ---`);
 
   const channelInfo = await slack.getChannelInfo(CONFIG.slack.channelId);
   console.log(`[Slack] 채널: ${channelInfo.channel.name} (ID: ${CONFIG.slack.channelId})`);
 
-  const messages = await slack.fetchRecentMessages(
-    CONFIG.slack.channelId,
-    CONFIG.lookbackMinutes
-  );
+  // oldestTs: 마지막 수집 시점이 있으면 그 시점부터, 없으면 전체 (에포크 이후)
+  const oldestTs = lastTs ?? '0';
+  const messages = await slack.fetchMessagesSince(CONFIG.slack.channelId, oldestTs);
 
   if (messages.length === 0) {
     console.log('[INFO] 수집된 메시지 없음. 종료합니다.');
     return;
   }
 
-  // slack_ts 기준 내림차순(최신 우선) → 오름차순(오래된 순) 정렬
+  // slack_ts 기준 오름차순 정렬
   messages.sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
 
-  // 2. 메시지 파싱
-  console.log(`\n--- 메시지 파싱 ---`);
-  const records = parseMessages(messages);
+  // 3. 파싱
+  console.log(`\n--- 출퇴근 메시지 파싱 ---`);
+  const records = [];
 
-  if (records.length === 0) {
-    console.log('[INFO] 파싱된 출퇴근 기록 없음.');
-    return;
+  for (const msg of messages) {
+    const parsed = parseAttendanceMessage(msg, today);
+    if (!parsed) continue;
+
+    // 봇/서브타입 메시지 제외
+    if (msg.subtype && msg.subtype !== 'bot_message') continue;
+    if (parsed.name.length < 1) continue;
+
+    records.push(parsed);
+
+    // 상태 추론 (note에 지각/조퇴 등이 포함된 경우)
+    parsed.status = parsed.status || '정상';
+    parsed.note = parsed.note || '';
+
+    const timeStr = formatTimeDisplay(parsed.timestamp);
+    const typeStr = parsed.type === 'check-in' ? '▶ 출근' : '◀ 퇴근';
+    console.log(`  ${parsed.name.padEnd(8)} ${typeStr} ${timeStr.padEnd(12)} [${parsed.status}]${parsed.note ? ` (${parsed.note})` : ''}`);
   }
 
-  console.log(`[Parse] 총 ${records.length}개 레코드 파싱 완료`);
-  for (const r of records) {
-    const workType = determineWorkType(r.name);
-    const status = determineAttendanceStatus(r, workType);
-    r.date = today;
-    r.workType = workType;
-    r.status = status;
-    r.note = r.note || '';
-
-    const timeStr = formatTimeDisplay(r.timestamp);
-    const typeStr = r.type === 'check-in' ? '▶ 출근' : '◀ 퇴근';
-    console.log(`  ${r.name.padEnd(8)} ${typeStr} ${timeStr.padEnd(12)} [${status}]${r.note ? ` (${r.note})` : ''}`);
-  }
-
-  // 3. Google Sheets 기록
+  // 4. Google Sheets 기록
   console.log(`\n--- Google Sheets 기록 ---`);
 
-  const sheets = new SheetsClient();
-
-  const headerRow = ['날짜', '이름', '출근시간', '퇴근시간', '근무유형', '상태', '비고', 'slack_ts'];
-
-  // 출퇴근기록 시트
-  await sheets.ensureSheet('출퇴근기록', headerRow);
-  let currentAttendance = await sheets.readAll('출퇴근기록');
+  let attendanceRows = existingRows;
 
   // check-in과 check-out을 구분해서 시트에 추가
   const checkinRecords = records.filter(r => r.type === 'check-in');
@@ -500,31 +365,27 @@ async function main() {
 
   if (checkinRecords.length > 0) {
     console.log(`\n[출근 기록] ${checkinRecords.length}건`);
-    await sheets.appendRecords('출퇴근기록', checkinRecords, currentAttendance);
+    await sheets.appendRecords(sheetName, checkinRecords, attendanceRows);
 
     // append 후 시트를 다시 읽어서 새로운 row 번호 확보
-    currentAttendance = await sheets.readAll('출퇴근기록');
+    attendanceRows = await sheets.readAll(sheetName);
   }
 
   if (checkoutRecords.length > 0) {
     console.log(`[퇴근 기록] ${checkoutRecords.length}건`);
-    // checkout 기록은 별도 시트 추가 없이 기존 출근 row에 퇴근시간 업데이트
-    // (단, check-in 없이 퇴근만 있는 경우에는 append)
-    await sheets.appendRecords('출퇴근기록', checkoutRecords, currentAttendance);
-    currentAttendance = await sheets.readAll('출퇴근기록');
+    await sheets.appendRecords(sheetName, checkoutRecords, attendanceRows);
+    attendanceRows = await sheets.readAll(sheetName);
   }
 
   // 퇴근시간 업데이트: 기존 출근기록에 퇴근시간 덧붙이기
-  // 이미 appendRecords에서 slack_ts 중복 검사를 했으므로
-  // 현재 시트에서 같은 사람/날짜의 비어있는 출근 row를 찾아 업데이트
-  if (checkoutRecords.length > 0 && currentAttendance && currentAttendance.length > 1) {
+  if (checkoutRecords.length > 0 && attendanceRows && attendanceRows.length > 1) {
     for (const co of checkoutRecords) {
       const timeStr = formatTimeDisplay(co.timestamp);
 
       // 가장 최근 출근기록 찾기 (이름이 같고, 날짜가 같고, 퇴근시간이 비어있는 row)
       let targetRowIdx = -1;
-      for (let i = currentAttendance.length - 1; i >= 1; i--) {
-        const row = currentAttendance[i];
+      for (let i = attendanceRows.length - 1; i >= 1; i--) {
+        const row = attendanceRows[i];
         if (row[1] === co.name && row[0] === today && (!row[3] || row[3] === '')) {
           targetRowIdx = i + 1; // Sheets는 1-based, header가 1행
           break;
@@ -533,8 +394,8 @@ async function main() {
 
       if (targetRowIdx > 0) {
         await sheets.sheets.spreadsheets.values.update({
-          spreadsheetId: CONFIG.sheets.id,
-          range: `'출퇴근기록'!D${targetRowIdx}`,
+          spreadsheetId: sheets.sheetId,
+          range: `'${sheetName}'!D${targetRowIdx}`,
           valueInputOption: 'USER_ENTERED',
           requestBody: { values: [[timeStr]] },
         });

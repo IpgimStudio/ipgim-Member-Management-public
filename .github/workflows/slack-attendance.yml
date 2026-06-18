@@ -1,0 +1,43 @@
+name: Slack 출퇴근 기록 수집
+
+on:
+  schedule:
+    # UTC 기준 (KST = UTC+9)
+    - cron: '*/5 22-23 * * *'   # KST 07:00~08:55 (5분 간격 — 이른 출근자)
+    - cron: '*/10 0 * * *'      # KST 09:00~09:50 (10분 — 오전 집중)
+    - cron: '*/10 1-8 * * *'    # KST 10:00~17:50 (10분 — 업무시간)
+    - cron: '*/5 9-11 * * *'    # KST 18:00~20:55 (5분 — 퇴근 집중)
+  workflow_dispatch:
+    inputs:
+      lookback_minutes:
+        description: '조회할 과거 범위 (분)'
+        required: false
+        default: '30'
+        type: string
+
+jobs:
+  fetch-and-log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Slack → Sheets logger
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          GOOGLE_SERVICE_EMAIL: ${{ secrets.GOOGLE_SERVICE_EMAIL }}
+          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          LOOKBACK_MINUTES: ${{ inputs.lookback_minutes || '30' }}
+        run: node src/index.js
