@@ -388,7 +388,7 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v17.7 (퇴사자 무보고 필터 탑재)');
+  console.log('  Slack 출퇴근 스마트 로거 v17.8 (2분 주기 최적화 버전)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -419,8 +419,9 @@ async function main() {
     console.log(`[안내] API 보호를 위해 이번 최초 실행에서는 이모지 작업을 생략합니다.`);
     oldest = '0'; 
   } else {
-    console.log(`\n[안내] 시트에 데이터가 존재하여 '최근 30일치' 데이터를 동기화합니다.`);
-    oldest = String(Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60)); 
+    // 💡 [2분 주기 최적화 핵심] 매번 30일치를 돌리면 한도초과가 나므로, 데이터가 기입된 평소에는 최근 '1일(24시간)' 데이터만 가져옵니다.
+    console.log(`\n[안내] 2분 단기 동기화를 위해 '최근 24시간 내' 데이터만 신속 수집합니다.`);
+    oldest = String(Math.floor(Date.now() / 1000) - (24 * 60 * 60)); 
   }
 
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
@@ -445,9 +446,7 @@ async function main() {
     }
   }
 
-  // 💡 [핵심 신규 추가] 모든 임직원의 '마지막 실제 근무 활동일' 분석 추적
   const lastActiveDate = {};
-  // 1) 기존 구글 시트에서 실근무 기록(결근/휴무가 아닌 상태) 기준 최종일 추출
   for (let i = 1; i < existingRows.length; i++) {
     const date = existingRows[i][0];
     const name = existingRows[i][2];
@@ -458,7 +457,6 @@ async function main() {
       }
     }
   }
-  // 2) 새로 수집된 슬랙 메시지 발송 날짜로 최종일 동기화
   for (const msg of messages) {
     if (msg.subtype && msg.subtype !== 'message_changed') continue;
     const text = msg.text?.trim() || '';
@@ -530,20 +528,17 @@ async function main() {
       const rowIdx = existingRows.findIndex(r => r[0] === date && r[2] === member); 
       const row = rowIdx >= 0 ? existingRows[rowIdx] : null;
 
-      // 💡 [핵심 필터 적용] 퇴사자 시점 분석 및 과거 유령 무보고 기록 청소 처리
       const isResigned = masterMap[member].status !== '재직' && masterMap[member].status !== 'active';
       if (isResigned) {
         const lastActive = lastActiveDate[member];
-        // 마지막 활동일 정보가 없거나, 현재 루프 날짜가 그 사람의 최종 활동일보다 미래인 경우
         if (!lastActive || date > lastActive) {
           if (row) {
             const status = row[4];
-            // 이미 시트에 적혀있던 무보고 기록('결근', '휴무')이 있다면 전체 공백으로 밀어서 삭제 유도
             if (['결근', '휴무'].includes(status) || row[11]?.includes('미보고')) {
               toUpdate.push({ range: `'${sheetName}'!A${rowIdx + 1}:L${rowIdx + 1}`, values: [Array(12).fill('')] });
             }
           }
-          continue; // 신규 결근 수집을 하지 않고 즉시 다음 사원으로 패스합니다.
+          continue; 
         }
       }
 
@@ -610,7 +605,7 @@ async function main() {
         }
       }
 
-      // 이모지 큐 로직
+      // 이모지 로직
       if (!isInitialRun && msgs.length > 0) {
         const isBirthday = masterMap[member].birthday && date.substring(5) === masterMap[member].birthday;
 
@@ -697,10 +692,11 @@ async function main() {
   await sheets.sortSheet(sheetName);
 
   if (reactionQueue.length > 0) {
-    console.log(`\n  [이모지 작업] 총 ${reactionQueue.length}개의 리액션을 슬랙에 추가합니다... (API 제한 방어 적용)`);
+    console.log(`\n  [이모지 작업] 총 ${reactionQueue.length}개의 리액션을 슬랙에 신속 추가합니다...`);
     for (const req of reactionQueue) {
       await slack.addReaction(CONFIG.slack.channelId, req.ts, req.emoji);
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // 💡 2분 주기에서는 새로 유입되는 메시지가 극히 소수이므로 대기 간격을 최소화(50ms)하여 실시간성을 극대화합니다.
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
   }
 
