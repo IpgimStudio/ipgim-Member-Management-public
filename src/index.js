@@ -59,6 +59,7 @@ function getKstObj(ts) {
   return new Date(parseFloat(ts) * 1000 + 9 * 60 * 60 * 1000);
 }
 
+// 💡 [수정됨] 날짜 복구기 (45818 -> 2025-06-10)
 function normalizeSheetDate(val) {
   if (!val) return '';
   const strVal = String(val).trim();
@@ -73,6 +74,20 @@ function normalizeSheetDate(val) {
   let clean = strVal.replace(/[\.\/]/g, '-').replace(/\s/g, '');
   if (clean.endsWith('-')) clean = clean.slice(0, -1);
   return clean.length === 10 ? clean : strVal;
+}
+
+// 💡 [신규] 시간 복구기 (0.3743055556 -> 08:59)
+function normalizeSheetTime(val) {
+  if (!val || val === '-') return '-';
+  const strVal = String(val).trim();
+  // 구글 시트의 시간 소수점 형태인지 감지
+  if (/^0\.\d+$/.test(strVal)) {
+    const totalMinutes = Math.round(parseFloat(strVal) * 24 * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+  return strVal;
 }
 
 function cleanUserName(rawName) {
@@ -294,7 +309,7 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v15.0 (최초 활동일 감지)');
+  console.log('  Slack 출퇴근 스마트 로거 v15.1 (Raw Format 강제)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -306,7 +321,13 @@ async function main() {
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제']);
   
   let existingRows = await sheets.readAll(sheetName);
-  for (let i = 1; i < existingRows.length; i++) existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);
+  
+  // 💡 [수정됨] 기존에 깨져있는 날짜와 시간을 메모리 상에서 완벽히 복구합니다.
+  for (let i = 1; i < existingRows.length; i++) {
+    existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);  // 날짜 복구
+    existingRows[i][7] = normalizeSheetTime(existingRows[i][7]);  // 출근시간 복구
+    existingRows[i][8] = normalizeSheetTime(existingRows[i][8]);  // 퇴근시간 복구
+  }
 
   const lastTs = sheets.getLatestSlackTs(existingRows);
   const slack = new SlackClient(CONFIG.slack.token);
@@ -316,36 +337,26 @@ async function main() {
   const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   
-  // 💡 [신규] 0. 사원별 '최초 활동일(입사일)' 정밀 감지
   const firstActiveDate = {};
-  
-  // (1) 기존 시트에서 진짜 활동 기록 추출 (auto 생성 기록 무시)
   for (let i = 1; i < existingRows.length; i++) {
     const date = existingRows[i][0];
     const name = existingRows[i][2]; 
-    const tsStr = existingRows[i][12]; // slack_ts
-    
-    // 코드가 임의로 만든 결근 기록은 입사일 계산에서 제외
+    const tsStr = existingRows[i][12]; 
     if (!tsStr || String(tsStr).startsWith('auto')) continue;
-    
     if (date && name) {
       if (!firstActiveDate[name] || date < firstActiveDate[name]) firstActiveDate[name] = date;
     }
   }
-  
-  // (2) 새로 불러온 슬랙 메시지에서 활동 기록 추출
   for (const msg of messages) {
     if (msg.subtype && msg.subtype !== 'message_changed') continue;
     const date = getDateFromTs(msg.ts);
     const rawName = userMap[msg.user] || msg.user;
     const name = cleanUserName(rawName);
-    
     if (name && (!firstActiveDate[name] || date < firstActiveDate[name])) {
       firstActiveDate[name] = date;
     }
   }
 
-  // 1. 메시지 그룹화 (날짜 -> 이름 -> [메시지 배열])
   const groupedMsgs = {};
   for (const msg of messages) {
     if (msg.subtype && msg.subtype !== 'message_changed') continue; 
@@ -355,7 +366,6 @@ async function main() {
     const dateStr = getDateFromTs(msg.ts);
     const userName = cleanUserName(userMap[msg.user] || msg.user);
 
-    // 미등록 사원은 '최초 활동일'을 입사일로 등록!
     if (!masterMap[userName]) {
       const joinDate = firstActiveDate[userName] || dateStr;
       console.log(`  [신규 등록] ${userName} (입사일: ${joinDate}) 사원마스터에 추가 중...`);
@@ -392,7 +402,6 @@ async function main() {
   const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const currentHour = nowKst.getUTCHours();
 
-  // 2. 날짜별 순회 및 로컬 스크립트 로직 적용
   for (const date of allDays) {
     const dObj = new Date(date);
     const dayOfWeek = dObj.getDay();
@@ -401,7 +410,6 @@ async function main() {
     const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
 
     for (const member of activeMembers) {
-      // 💡 [핵심] 사원마스터의 입사일뿐만 아니라, 시스템이 직접 감지한 '최초 활동일' 이전의 결근 데이터는 아예 생성 금지!
       const userJoinDate = firstActiveDate[member] || masterMap[member].joinDate;
       if (date < userJoinDate) continue;
 
@@ -418,7 +426,6 @@ async function main() {
       const allText = msgs.map(m => m.text.replace(/\n/g, ' ')).join(' | ');
       let leaveStatus = extractLeaveStatus(allText);
 
-      // 결근 및 미보고 처리
       if (msgs.length === 0) {
         if (!row) {
           if (date === todayStr && currentHour < 23) continue; 
@@ -436,7 +443,6 @@ async function main() {
         continue;
       }
 
-      // 출근 기록이 있는 경우
       let times = [];
       for (const m of msgs) times.push(...extractTimeFromText(m.text, m.ts));
       times.sort((a, b) => a - b);
@@ -485,16 +491,22 @@ async function main() {
     }
   }
 
+  // 💡 [수정됨] valueInputOption을 'RAW'로 변경하여 구글 시트의 자동 숫자 변환을 강제 차단합니다.
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
       spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:N`,
-      valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend },
+      valueInputOption: 'RAW', // <-- 숫자로 깨지는 현상 차단
+      insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend },
     });
   }
 
   if (toUpdate.length > 0) {
     await sheets.sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: sheets.sheetId, requestBody: { valueInputOption: 'USER_ENTERED', data: toUpdate }
+      spreadsheetId: sheets.sheetId, 
+      requestBody: { 
+        valueInputOption: 'RAW', // <-- 숫자로 깨지는 현상 차단
+        data: toUpdate 
+      }
     });
   }
 
