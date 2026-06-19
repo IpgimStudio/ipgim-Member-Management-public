@@ -11,10 +11,8 @@ let CONFIG = {};
 
 if (fs.existsSync(CONFIG_FILE)) {
   CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-  console.log('[CONFIG] 파일 로드 완료');
 }
 
-// 환경변수 세팅 (GitHub Actions)
 CONFIG.slack = CONFIG.slack || {};
 CONFIG.sheets = CONFIG.sheets || {};
 if (process.env.SLACK_BOT_TOKEN) CONFIG.slack.token = process.env.SLACK_BOT_TOKEN;
@@ -23,9 +21,7 @@ if (process.env.SHEET_ID) CONFIG.sheets.sheetId = process.env.SHEET_ID;
 if (process.env.GOOGLE_SERVICE_EMAIL) CONFIG.sheets.serviceEmail = process.env.GOOGLE_SERVICE_EMAIL;
 if (process.env.GOOGLE_PRIVATE_KEY) CONFIG.sheets.privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
-if (!CONFIG.sheets.sheetNames) {
-  CONFIG.sheets.sheetNames = { attendance: '출퇴근기록' };
-}
+if (!CONFIG.sheets.sheetNames) CONFIG.sheets.sheetNames = { attendance: '출퇴근기록' };
 
 // ─────────────────── 유틸리티 ───────────────────
 function formatTimeDisplay(ts) {
@@ -74,12 +70,23 @@ class SlackClient {
       cursor = result.response_metadata?.next_cursor;
     } while (cursor);
     
-    // 과거(오래된) 메시지부터 순서대로 처리하기 위해 오름차순 정렬
+    // 과거 메시지부터 순서대로 정렬
     return allMessages.sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
   }
 
-  async getChannelInfo(channelId) {
-    return this.call('conversations.info', { channel: channelId });
+  async getUsers() {
+    const userMap = {};
+    let cursor;
+    do {
+      const params = { limit: 200 };
+      if (cursor) params.cursor = cursor;
+      const res = await this.call('users.list', params);
+      for (const member of res.members) {
+        userMap[member.id] = member.profile?.display_name || member.real_name || member.name;
+      }
+      cursor = res.response_metadata?.next_cursor;
+    } while (cursor);
+    return userMap;
   }
 }
 
@@ -87,9 +94,7 @@ class SlackClient {
 class SheetsClient {
   constructor() {
     const auth = new google.auth.JWT(
-      CONFIG.sheets.serviceEmail,
-      null,
-      CONFIG.sheets.privateKey,
+      CONFIG.sheets.serviceEmail, null, CONFIG.sheets.privateKey,
       ['https://www.googleapis.com/auth/spreadsheets'],
     );
     this.sheets = google.sheets({ version: 'v4', auth });
@@ -98,27 +103,19 @@ class SheetsClient {
 
   async ensureSheet(sheetName, headerRow) {
     const res = await this.sheets.spreadsheets.get({ spreadsheetId: this.sheetId });
-    const exists = res.data.sheets.some(s => s.properties.title === sheetName);
-    if (exists) return;
-
+    if (res.data.sheets.some(s => s.properties.title === sheetName)) return;
     await this.sheets.spreadsheets.batchUpdate({
       spreadsheetId: this.sheetId,
       requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
     });
     await this.sheets.spreadsheets.values.update({
-      spreadsheetId: this.sheetId,
-      range: `'${sheetName}'!A1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [headerRow] },
+      spreadsheetId: this.sheetId, range: `'${sheetName}'!A1`,
+      valueInputOption: 'RAW', requestBody: { values: [headerRow] },
     });
-    console.log(`[Sheets] 시트 생성: ${sheetName}`);
   }
 
   async readAll(sheetName) {
-    const res = await this.sheets.spreadsheets.values.get({
-      spreadsheetId: this.sheetId,
-      range: `'${sheetName}'!A:K`,
-    });
+    const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:K` });
     return res.data.values || [];
   }
 
@@ -126,170 +123,92 @@ class SheetsClient {
     if (!rows || rows.length < 2) return null;
     let latest = 0;
     for (let i = 1; i < rows.length; i++) {
-      const ts = parseFloat(rows[i][9]); // J열 = slack_ts
+      const ts = parseFloat(rows[i][9]);
       if (ts > latest) latest = ts;
     }
     return latest === 0 ? null : String(latest);
   }
 }
 
-// ─────────────────── 메시지 파싱 ───────────────────
-function parseAttendanceMessage(msg, today) {
-  const text = msg.text?.trim() || '';
-  const patterns = [
-    /^(.+?)\s+(출근|퇴근|퇴군)\s*$/,
-    /^(.+?)\s+(출근|퇴근|퇴군)\s+(.+)$/,
-    /^(.+?)\s+(출근|퇴근|퇴군)\s*[(\/]\s*(.+?)\s*[)]?$/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const result = {
-        slackTs: msg.ts,
-        timestamp: parseFloat(msg.ts),
-        date: today,
-        name: match[1].trim(),
-        type: match[2] === '출근' ? 'check-in' : 'check-out',
-        workType: '고정',
-        status: '정상',
-        note: '',
-      };
-      
-      if (match[3]) {
-        const rest = match[3].trim();
-        if (rest.includes('유연')) result.workType = '유연';
-        
-        const statusMap = { 지각: '지각', 시간외: '시간외', 조퇴: '조퇴', 결근: '결근' };
-        for (const [k, v] of Object.entries(statusMap)) {
-          if (rest.includes(k)) { result.status = v; break; }
-        }
-        
-        const noteMatch = rest.match(/[\(（](.+?)[\)）]/);
-        if (noteMatch) result.note = noteMatch[1];
-      }
-      return result;
-    }
-  }
-  return null;
-}
-
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 로거 v2.0 실행');
+  console.log('  Slack 로거 v4.0 실행 (모든 메시지 수집)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
   const sheetName = CONFIG.sheets.sheetNames.attendance;
+  // 기존 헤더 구조 유지
   const headerRow = ['날짜', '이름', '출근시간', '퇴근시간', '근무유형', '상태', '연장', '연장시간(분)', '비고', 'slack_ts', '출처'];
 
   await sheets.ensureSheet(sheetName, headerRow);
   
-  // 1. 기존 데이터 읽기 및 마지막 수집 시점 파악
   let existingRows = await sheets.readAll(sheetName);
   const lastTs = sheets.getLatestSlackTs(existingRows);
-  console.log(`[Sheets] 기존 데이터: ${Math.max(0, existingRows.length - 1)}행`);
-  console.log(`[Sheets] 마지막 수집 Timestamp: ${lastTs ?? '없음 (최초 전체 수집 시작)'}\n`);
+  console.log(`[Sheets] 기준 데이터: ${Math.max(0, existingRows.length - 1)}행 (마지막 TS: ${lastTs ?? '없음'})`);
 
-  // 2. Slack 채널 정보 및 메시지 조회
   const slack = new SlackClient(CONFIG.slack.token);
-  const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0'; // 마지막 수집 직후부터
   
-  console.log(`--- Slack 채널 메시지 수집 중... ---`);
+  console.log(`\n--- Slack 사용자 목록 동기화 중 ---`);
+  const userMap = await slack.getUsers();
+  console.log(`[Slack] ${Object.keys(userMap).length}명의 사용자 이름 로드 완료!`);
+
+  const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
+  
+  console.log(`\n--- Slack 채널 메시지 수집 중... ---`);
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   console.log(`[Slack] 처리할 새 메시지: ${messages.length}건\n`);
 
-  if (messages.length === 0) {
-    console.log(`✅ 새로운 출퇴근 기록이 없습니다. 로직을 종료합니다.`);
-    return;
-  }
+  if (messages.length === 0) return console.log(`✅ 새로운 메시지가 없습니다.`);
 
-  // 3. 메시지 분석 및 시트 반영 준비
   const toAppend = [];
-  const toUpdate = []; // { range, values }
   let parsedCount = 0;
 
   for (const msg of messages) {
-    if (msg.subtype) continue; // 봇 메시지 등 제외
+    // 사용자가 남긴 일반 메시지만 처리 (시스템 메시지/봇 메시지는 대부분 걸러짐)
+    if (msg.subtype && msg.subtype !== 'message_changed') continue; 
     
-    const dateStr = getDateFromTs(msg.ts);
-    const parsed = parseAttendanceMessage(msg, dateStr);
-    
-    if (!parsed || !parsed.name) continue;
+    const text = msg.text?.trim() || '';
+    if (!text && !msg.attachments && !msg.files) continue; // 완전히 빈 메시지 제외
+
     parsedCount++;
+    const dateStr = getDateFromTs(msg.ts);
+    const timeStr = formatTimeDisplay(msg.ts);
+    const userName = userMap[msg.user] || msg.user || '알 수 없음';
+    
+    // 줄바꿈 문자를 공백으로 변경하여 한 줄로 만들기
+    const noteText = text.replace(/\n/g, ' ');
 
-    const timeStr = formatTimeDisplay(parsed.timestamp);
-    const typeStr = parsed.type === 'check-in' ? '▶ 출근' : '◀ 퇴근';
-    console.log(`  ${parsed.date} ${parsed.name.padEnd(6)} ${typeStr} ${timeStr.padEnd(8)} [${parsed.status}] ${parsed.note}`);
+    console.log(`  [${dateStr} ${timeStr}] ${userName.padEnd(6)}: ${noteText.substring(0, 20)}...`);
 
-    if (parsed.type === 'check-in') {
-      // 출근 기록은 무조건 새 행으로 추가
-      toAppend.push([
-        parsed.date, parsed.name, timeStr, '', parsed.workType, parsed.status, '', '', parsed.note, parsed.slackTs, 'slack-logger'
-      ]);
-      // 새로 추가될 데이터도 existingRows 구조에 임시 반영 (당일 퇴근 처리 시 찾기 위함)
-      existingRows.push([parsed.date, parsed.name, timeStr, '', parsed.workType, parsed.status, '', '', parsed.note, parsed.slackTs, 'slack-logger']);
-    } 
-    else if (parsed.type === 'check-out') {
-      // 퇴근 기록: 당일 동일 이름의 행을 아래에서부터 탐색
-      let targetRowIdx = -1;
-      for (let i = existingRows.length - 1; i >= 1; i--) {
-        const row = existingRows[i];
-        if (row[0] === parsed.date && row[1] === parsed.name) {
-          targetRowIdx = i;
-          break;
-        }
-      }
-
-      if (targetRowIdx !== -1) {
-        // 기존 행이 존재하는 경우 (출근 기록이 있음): D열(퇴근시간)과 J열(slack_ts 최신화)만 업데이트
-        existingRows[targetRowIdx][3] = timeStr; // D열 메모리 업데이트
-        existingRows[targetRowIdx][9] = parsed.slackTs; // J열 메모리 업데이트 (마지막 수집 시점 갱신용)
-        
-        toUpdate.push({
-          range: `'${sheetName}'!D${targetRowIdx + 1}`,
-          values: [[timeStr]]
-        });
-        toUpdate.push({
-          range: `'${sheetName}'!J${targetRowIdx + 1}`,
-          values: [[parsed.slackTs]]
-        });
-      } else {
-        // 출근 기록 없이 퇴근 메시지만 있는 경우: 새 행으로 추가 (출근시간 비움)
-        toAppend.push([
-          parsed.date, parsed.name, '', timeStr, parsed.workType, parsed.status, '', '', parsed.note, parsed.slackTs, 'slack-logger'
-        ]);
-        existingRows.push([parsed.date, parsed.name, '', timeStr, parsed.workType, parsed.status, '', '', parsed.note, parsed.slackTs, 'slack-logger']);
-      }
-    }
+    // 모든 메시지를 단순히 새 행으로 추가
+    toAppend.push([
+      dateStr,      // A: 날짜
+      userName,     // B: 이름
+      timeStr,      // C: 출근시간 (작성 시간으로 활용)
+      '',           // D: 퇴근시간 (비워둠)
+      '',           // E: 근무유형
+      '',           // F: 상태
+      '',           // G: 연장
+      '',           // H: 연장시간(분)
+      noteText,     // I: 비고 (메시지 전체 내용)
+      msg.ts,       // J: slack_ts (중복 검사 및 마지막 수집 위치 파악용)
+      'slack-logger'// K: 출처
+    ]);
   }
 
-  // 4. Google Sheets 일괄 쓰기 (Batching)
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
-      spreadsheetId: sheets.sheetId,
+      spreadsheetId: sheets.sheetId, 
       range: `'${sheetName}'!A:K`,
-      valueInputOption: 'USER_ENTERED',
+      valueInputOption: 'USER_ENTERED', 
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: toAppend },
     });
-    console.log(`\n[Sheets] ${toAppend.length}개의 새로운 출/퇴근 행 추가 완료`);
-  }
-
-  if (toUpdate.length > 0) {
-    await sheets.sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: sheets.sheetId,
-      requestBody: {
-        valueInputOption: 'USER_ENTERED',
-        data: toUpdate
-      }
-    });
-    console.log(`[Sheets] ${toUpdate.length / 2}건의 퇴근 시간 업데이트 완료`);
   }
 
   console.log(`\n========================================`);
-  console.log(`  ✅ 수집 완료 (유효 데이터: ${parsedCount}건)`);
+  console.log(`  ✅ 수집 완료 (정상 반영: ${parsedCount}건)`);
   console.log(`========================================`);
 }
 
