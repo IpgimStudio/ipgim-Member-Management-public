@@ -354,7 +354,7 @@ class SheetsClient {
             status: rows[i][1] || '재직', 
             joinDate: rows[i][2] || '2000-01-01', 
             workType: rows[i][5] || '고정',
-            birthday: rows[i][6] ? rows[i][6].trim() : '' // 💡 생일(MM-DD) 컬럼 매핑
+            birthday: rows[i][6] ? rows[i][6].trim() : '' // 💡 생일 컬럼 매핑
           };
         }
       }
@@ -402,8 +402,8 @@ async function main() {
   const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '휴가/연월차구분', '비고'];
   await sheets.ensureSheet(sheetName, HEADERS);
   
-  // 💡 [수정됨] 사원마스터 헤더에 '생일(MM-DD)' 필드 추가
-  await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제', '생일(MM-DD)']);
+  // 💡 [수정됨] 사원마스터 헤더에 '생일' 필드 추가
+  await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제', '생일']);
   
   let existingRows = await sheets.readAll(sheetName);
   
