@@ -1,4 +1,4 @@
-name: Slack 출퇴근 기록 수집
+name: Slack
 
 on:
   schedule:
