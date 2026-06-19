@@ -563,11 +563,6 @@ async function main() {
         else if (workTypeKey === 'PART_TIME') analysis = analyzePartTime(startMin, endMin);
       }
 
-      // 💡 휴가를 실제로 사용한 날에도 대상 구분을 연차/월차로 표기
-      let autoLeaveType = '-';
-      if (['연차', '반차', '휴가'].includes(status)) {
-        autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
-      }
 
       if (!row) {
         const newRow = [
