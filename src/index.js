@@ -78,7 +78,6 @@ const HOLIDAYS = {
 
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
-// 💡 [추가됨] 랜덤 이모지 풀 (Pool)
 const EMOJI_POOLS = {
   clockIn: ['muscle', 'fire', 'sparkles', 'star2', 'coffee', 'sun_with_face', 'rocket', 'v', 'blush', 'grinning'],
   clockOut: ['wave', 'clap', '100', 'beers', 'moon', 'zzz', 'tada', 'thumbsup', 'star-struck', 'heart_eyes', 'relaxed'],
@@ -87,7 +86,6 @@ const EMOJI_POOLS = {
 };
 
 // ─────────────────── 유틸리티 및 분석 엔진 ───────────────────
-// 💡 [추가됨] 이모지 풀에서 원하는 개수만큼 섞어서 뽑아오는 함수
 function getRandomEmojis(pool, count) {
   const shuffled = [...pool].sort(() => 0.5 - Math.random());
   return shuffled.slice(0, count);
@@ -341,7 +339,6 @@ class SheetsClient {
   }
   async getEmployeeMaster() {
     try {
-      // 💡 [수정됨] 생일 데이터를 가져오기 위해 탐색 범위를 A:G 로 확장
       const res = await this.sheets.spreadsheets.values.get({
         spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G`,
       });
@@ -354,7 +351,7 @@ class SheetsClient {
             status: rows[i][1] || '재직', 
             joinDate: rows[i][2] || '2000-01-01', 
             workType: rows[i][5] || '고정',
-            birthday: rows[i][6] ? rows[i][6].trim() : '' // 💡 생일 컬럼 매핑
+            birthday: rows[i][6] ? rows[i][6].trim() : '' 
           };
         }
       }
@@ -363,7 +360,6 @@ class SheetsClient {
   }
   async addEmployee(name, joinDate) {
     await this.sheets.spreadsheets.values.append({
-      // 💡 [수정됨] 범위를 A:G 로 확장
       spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G`,
       valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS',
       requestBody: { values: [[name, '재직', joinDate, '', '자동등록', '고정', '']] },
@@ -392,7 +388,7 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v17.6 (스마트 생일/랜덤 이모지 탑재)');
+  console.log('  Slack 출퇴근 스마트 로거 v17.7 (퇴사자 무보고 필터 탑재)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -401,9 +397,7 @@ async function main() {
   
   const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '휴가/연월차구분', '비고'];
   await sheets.ensureSheet(sheetName, HEADERS);
-  
-  // 💡 [수정됨] 사원마스터 헤더에 '생일' 필드 추가
-  await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제', '생일']);
+  await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제', '생일(MM-DD)']);
   
   let existingRows = await sheets.readAll(sheetName);
   
@@ -448,6 +442,33 @@ async function main() {
     const name = cleanUserName(rawName);
     if (name && (!firstActiveDate[name] || date < firstActiveDate[name])) {
       firstActiveDate[name] = date;
+    }
+  }
+
+  // 💡 [핵심 신규 추가] 모든 임직원의 '마지막 실제 근무 활동일' 분석 추적
+  const lastActiveDate = {};
+  // 1) 기존 구글 시트에서 실근무 기록(결근/휴무가 아닌 상태) 기준 최종일 추출
+  for (let i = 1; i < existingRows.length; i++) {
+    const date = existingRows[i][0];
+    const name = existingRows[i][2];
+    const status = existingRows[i][4];
+    if (date && name && status && !['결근', '휴무', '-'].includes(status)) {
+      if (!lastActiveDate[name] || date > lastActiveDate[name]) {
+        lastActiveDate[name] = date;
+      }
+    }
+  }
+  // 2) 새로 수집된 슬랙 메시지 발송 날짜로 최종일 동기화
+  for (const msg of messages) {
+    if (msg.subtype && msg.subtype !== 'message_changed') continue;
+    const text = msg.text?.trim() || '';
+    if (!text) continue;
+    const dateStr = getDateFromTs(msg.ts);
+    const userName = cleanUserName(userMap[msg.user] || msg.user);
+    if (userName) {
+      if (!lastActiveDate[userName] || dateStr > lastActiveDate[userName]) {
+        lastActiveDate[userName] = dateStr;
+      }
     }
   }
 
@@ -508,6 +529,23 @@ async function main() {
       const msgs = groupedMsgs[date]?.[member] || [];
       const rowIdx = existingRows.findIndex(r => r[0] === date && r[2] === member); 
       const row = rowIdx >= 0 ? existingRows[rowIdx] : null;
+
+      // 💡 [핵심 필터 적용] 퇴사자 시점 분석 및 과거 유령 무보고 기록 청소 처리
+      const isResigned = masterMap[member].status !== '재직' && masterMap[member].status !== 'active';
+      if (isResigned) {
+        const lastActive = lastActiveDate[member];
+        // 마지막 활동일 정보가 없거나, 현재 루프 날짜가 그 사람의 최종 활동일보다 미래인 경우
+        if (!lastActive || date > lastActive) {
+          if (row) {
+            const status = row[4];
+            // 이미 시트에 적혀있던 무보고 기록('결근', '휴무')이 있다면 전체 공백으로 밀어서 삭제 유도
+            if (['결근', '휴무'].includes(status) || row[11]?.includes('미보고')) {
+              toUpdate.push({ range: `'${sheetName}'!A${rowIdx + 1}:L${rowIdx + 1}`, values: [Array(12).fill('')] });
+            }
+          }
+          continue; // 신규 결근 수집을 하지 않고 즉시 다음 사원으로 패스합니다.
+        }
+      }
 
       let rawWorkType = masterMap[member].workType;
       let workTypeKey = 'UNKNOWN';
@@ -572,9 +610,8 @@ async function main() {
         }
       }
 
-      // 💡 [수정됨] 스마트 이모지 & 생일 축하 로직
+      // 이모지 큐 로직
       if (!isInitialRun && msgs.length > 0) {
-        // 사원마스터에 생일이 입력되어 있고, 오늘 날짜(MM-DD)와 일치하는지 확인
         const isBirthday = masterMap[member].birthday && date.substring(5) === masterMap[member].birthday;
 
         for (const m of msgs) {
@@ -587,19 +624,15 @@ async function main() {
             
             let emojisToAdd = [];
             
-            // 1. 생일이면서 출근이나 퇴근 보고를 올린 경우 (생일 이모지 랜덤 5개)
             if (isBirthday && (isMsgClockIn || isMsgClockOut)) {
               emojisToAdd = getRandomEmojis(EMOJI_POOLS.birthday, 5);
             } 
-            // 2. 퇴근 보고를 올린 경우 (수고 이모지 랜덤 1개)
             else if (isMsgClockOut) { 
               emojisToAdd = getRandomEmojis(EMOJI_POOLS.clockOut, 1);
             } 
-            // 3. 출근 보고를 올린 경우 (파이팅 이모지 랜덤 1개)
             else if (isMsgClockIn) {
               emojisToAdd = getRandomEmojis(EMOJI_POOLS.clockIn, 1);
             } 
-            // 4. 출근/퇴근 단어가 전혀 없는 경우 (물음표 1개)
             else {
               emojisToAdd = getRandomEmojis(EMOJI_POOLS.unknown, 1);
             }
