@@ -30,78 +30,21 @@ if (!CONFIG.sheets.sheetNames) {
 
 // ─────────────────── 상수 (휴일, 요일 및 이모지 풀) ───────────────────
 const HOLIDAYS = {
-  // --- 2025년 ---
-  "2025-01-01": "신정", 
-  "2025-01-27": "임시공휴일", 
-  "2025-01-28": "설날", 
-  "2025-01-29": "설날", 
-  "2025-01-30": "설날",
-  "2025-03-01": "삼일절", 
-  "2025-03-03": "대체공휴일", 
-  "2025-05-01": "근로자의 날", 
-  "2025-05-05": "어린이날/부처님오신날", 
-  "2025-05-06": "대체공휴일",
-  "2025-06-06": "현충일", 
-  "2025-08-15": "광복절", 
-  "2025-10-03": "개천절", 
-  "2025-10-05": "추석",
-  "2025-10-06": "추석", 
-  "2025-10-07": "추석", 
-  "2025-10-08": "대체공휴일", 
-  "2025-10-09": "한글날", 
-  "2025-12-25": "성탄절",
-
-  // --- 2026년 ---
-  "2026-01-01": "신정", 
-  "2026-02-16": "설날", 
-  "2026-02-17": "설날", 
-  "2026-02-18": "설날",
-  "2026-03-01": "삼일절", 
-  "2026-03-02": "대체공휴일", 
-  "2026-05-01": "근로자의 날", 
-  "2026-05-05": "어린이날", 
-  "2026-05-24": "부처님오신날",
-  "2026-05-25": "대체공휴일", 
-  "2026-06-03": "전국동시지방선거", 
-  "2026-06-06": "현충일", 
-  "2026-07-17": "제헌절",
-  "2026-08-15": "광복절", 
-  "2026-08-17": "대체공휴일",
-  "2026-09-24": "추석", 
-  "2026-09-25": "추석", 
-  "2026-09-26": "추석", 
-  "2026-10-03": "개천절",
-  "2026-10-05": "대체공휴일", 
-  "2026-10-09": "한글날", 
-  "2026-12-25": "성탄절"
+  "2025-01-01": "신정", "2025-01-27": "임시공휴일", "2025-01-28": "설날", "2025-01-29": "설날", "2025-01-30": "설날",
+  "2025-03-01": "삼일절", "2025-03-03": "대체공휴일", "2025-05-01": "근로자의 날", "2025-05-05": "어린이날/부처님오신날", "2025-05-06": "대체공휴일",
+  "2025-06-06": "현충일", "2025-08-15": "광복절", "2025-10-03": "개천절", "2025-10-05": "추석", "2025-10-06": "추석",
+  "2025-10-07": "추석", "2025-10-08": "대체공휴일", "2025-10-09": "한글날", "2025-12-25": "성탄절"
 };
 
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
 const EMOJI_POOLS = {
-  // ☀️ 출근 (에너지, 아침, 의지, 업무 시작)
-  clockIn: [
-    'muscle', 'fire', 'sparkles', 'star2', 'coffee', 'sun_with_face', 'rocket', 'v', 'blush', 'grinning',
-    'sunrise', 'zap', 'punch', 'briefcase', 'computer', 'raising_hand', 'smile', 'sunglasses', 'hero'
-  ],
-  
-  // 🌙 퇴근 (휴식, 귀가, 수고, 축하, 해방)
-  clockOut: [
-    'wave', 'clap', '100', 'beers', 'moon', 'zzz', 'tada', 'thumbsup', 'star-struck', 'heart_eyes', 'relaxed',
-    'house', 'night_with_stars', 'raised_hands', 'checkered_flag', 'couch_and_lamp', 'video_game', 'beer', 'runner', 'dizzy_face'
-  ],
-  
-  // 🎂 생일 (파티, 축하, 화려함)
-  birthday: [
-    'partying_face', 'birthday', 'cake', 'confetti_ball', 'gift', 'balloon', 'tada', 'clinking_glasses', 'crown', 'sparkler',
-    'champagne', 'cupcake', 'fireworks', 'bouquet', 'gem', 'dancer', 'musical_note'
-  ],
-  
-  // 🤔 단순메시지/알 수 없음 (생각, 확인 중, 봇의 반응)
-  unknown: [
-    'question'
-  ]
+  clockIn: ['muscle', 'fire', 'sparkles', 'star2', 'coffee', 'sun_with_face', 'rocket', 'v', 'blush', 'grinning', 'sunrise', 'zap', 'punch', 'briefcase', 'computer', 'raising_hand', 'smile', 'sunglasses', 'hero'],
+  clockOut: ['wave', 'clap', '100', 'beers', 'moon', 'zzz', 'tada', 'thumbsup', 'star-struck', 'heart_eyes', 'relaxed', 'house', 'night_with_stars', 'raised_hands', 'checkered_flag', 'couch_and_lamp', 'video_game', 'beer', 'runner', 'dizzy_face'],
+  birthday: ['partying_face', 'birthday', 'cake', 'confetti_ball', 'gift', 'balloon', 'tada', 'clinking_glasses', 'crown', 'sparkler', 'champagne', 'cupcake', 'fireworks', 'bouquet', 'gem', 'dancer', 'musical_note'],
+  unknown: ['question', 'thinking_face', 'monocle_face', 'eyes', 'shrug', 'grey_question', 'mag', 'robot_face', 'face_with_raised_eyebrow', 'memo']
 };
+
 // ─────────────────── 유틸리티 및 분석 엔진 ───────────────────
 function getRandomEmojis(pool, count) {
   const shuffled = [...pool].sort(() => 0.5 - Math.random());
@@ -110,6 +53,7 @@ function getRandomEmojis(pool, count) {
 
 function formatTimeFromMins(totalMinutes) {
   if (totalMinutes === undefined || totalMinutes === null) return '-';
+  // 새벽 야근 표기를 위해 24시간 이상(예: 25:30) 표현 허용
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
@@ -118,6 +62,13 @@ function formatTimeFromMins(totalMinutes) {
 function getDateFromTs(ts) {
   const kst = new Date(parseFloat(ts) * 1000 + 9 * 60 * 60 * 1000);
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
+}
+
+// 💡 [추가됨] 특정 날짜의 전날 날짜를 구하는 유틸리티 함수
+function getYesterdayDateStr(dateStr) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function getKstObj(ts) {
@@ -130,10 +81,7 @@ function normalizeSheetDate(val) {
   if (/^\d{5}$/.test(strVal)) {
     const excelEpoch = new Date(Date.UTC(1899, 11, 30));
     const date = new Date(excelEpoch.getTime() + parseInt(strVal) * 86400000);
-    const y = date.getUTCFullYear();
-    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(date.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
   }
   let clean = strVal.replace(/[\.\/]/g, '-').replace(/\s/g, '');
   if (clean.endsWith('-')) clean = clean.slice(0, -1);
@@ -145,9 +93,7 @@ function normalizeSheetTime(val) {
   const strVal = String(val).trim();
   if (/^0\.\d+$/.test(strVal)) {
     const totalMinutes = Math.round(parseFloat(strVal) * 24 * 60);
-    const h = Math.floor(totalMinutes / 60);
-    const m = totalMinutes % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    return formatTimeFromMins(totalMinutes);
   }
   return strVal;
 }
@@ -160,9 +106,7 @@ function getLeaveTypeByTenure(joinDateStr, currentDateStr) {
     const oneYearLater = new Date(join);
     oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
     return current >= oneYearLater ? '연차' : '월차';
-  } catch (e) {
-    return '-';
-  }
+  } catch (e) { return '-'; }
 }
 
 function cleanUserName(rawName) {
@@ -174,10 +118,17 @@ function snapToNearestHour(minutes) {
   return Math.round(minutes / 60) * 60;
 }
 
-function extractTimeFromText(text, ts) {
+// 💡 [수정됨] 텍스트 및 전송 시점 기반 시간 추출 (새벽 처리 반영)
+function extractTimeFromText(text, ts, isMidnightShift = false) {
   const times = [];
   const kstObj = getKstObj(ts);
-  times.push(kstObj.getUTCHours() * 60 + kstObj.getUTCMinutes()); 
+  let baseMinutes = kstObj.getUTCHours() * 60 + kstObj.getUTCMinutes();
+  
+  // 만약 새벽 0시~5시 사이 스크립트 분기점이고 퇴근 보고라면 시간을 24시간 누적으로 변환 (예: 새벽 1시 = 25시)
+  if (isMidnightShift) {
+    baseMinutes += 24 * 60;
+  }
+  times.push(baseMinutes); 
 
   if (text.includes('출근') || text.includes('입실')) {
     const timeRegex = /(\d{1,2})\s*[:시]\s*(\d{1,2})?/;
@@ -186,7 +137,9 @@ function extractTimeFromText(text, ts) {
       let hour = parseInt(match[1], 10);
       let minute = match[2] ? parseInt(match[2], 10) : (text.includes('반') ? 30 : 0);
       if (hour >= 0 && hour < 24 && minute >= 0 && minute < 60) {
-        times.push(hour * 60 + minute);
+        let textMins = hour * 60 + minute;
+        if (isMidnightShift && hour < 5) textMins += 24 * 60; // 텍스트 수기 입력도 새벽이면 24시간 더함
+        times.push(textMins);
       }
     }
   }
@@ -196,7 +149,6 @@ function extractTimeFromText(text, ts) {
 function extractLeaveStatus(text) {
   let cleanText = text.replace(/(내일|익일|모레|다음주|차주|다음 주|월요일|화요일|수요일|목요일|금요일)[^.!|\n]*(휴가|연차|반차|조퇴|결근|예비군|민방위)/g, '');
   cleanText = cleanText.replace(/(휴가|연차|반차|조퇴|결근|예비군|민방위)[^.!|\n]*(예정|계획)/g, '');
-
   cleanText = cleanText.replace(/(즐거|행복|좋은|잘|건강|풀|풀충전)[^.!|\n]*(명절|추석|연휴|휴가|주말)/g, '');
   cleanText = cleanText.replace(/(명절|추석|연휴|휴가|주말)[^.!|\n]*(보내|되|쉬|다녀|만나|뵙|충전)/g, '');
 
@@ -207,7 +159,6 @@ function extractLeaveStatus(text) {
   if (cleanText.includes('결근')) return '결근';
   if (cleanText.includes('예비군')) return '예비군';
   if (cleanText.includes('민방위')) return '민방위';
-  
   return '';
 }
 
@@ -295,9 +246,7 @@ class SlackClient {
     try {
       await this.call('reactions.add', { channel, timestamp, name: emojiName });
     } catch (err) {
-      if (!err.message.includes('already_reacted')) {
-        console.error(`  [이모지 실패] ${err.message}`);
-      }
+      if (!err.message.includes('already_reacted')) console.error(`  [이모지 실패] ${err.message}`);
     }
   }
   async fetchMessagesInRange(channelId, oldest) {
@@ -331,24 +280,15 @@ class SlackClient {
 
 class SheetsClient {
   constructor() {
-    const auth = new google.auth.JWT(
-      CONFIG.sheets.serviceEmail, null, CONFIG.sheets.privateKey,
-      ['https://www.googleapis.com/auth/spreadsheets'],
-    );
+    const auth = new google.auth.JWT(CONFIG.sheets.serviceEmail, null, CONFIG.sheets.privateKey, ['https://www.googleapis.com/auth/spreadsheets']);
     this.sheets = google.sheets({ version: 'v4', auth });
     this.sheetId = CONFIG.sheets.sheetId;
   }
   async ensureSheet(sheetName, headerRow) {
     const res = await this.sheets.spreadsheets.get({ spreadsheetId: this.sheetId });
     if (res.data.sheets.some(s => s.properties.title === sheetName)) return;
-    await this.sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.sheetId,
-      requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
-    });
-    await this.sheets.spreadsheets.values.update({
-      spreadsheetId: this.sheetId, range: `'${sheetName}'!A1`,
-      valueInputOption: 'RAW', requestBody: { values: [headerRow] },
-    });
+    await this.sheets.spreadsheets.batchUpdate({ spreadsheetId: this.sheetId, requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] } });
+    await this.sheets.spreadsheets.values.update({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A1`, valueInputOption: 'RAW', requestBody: { values: [headerRow] } });
   }
   async readAll(sheetName) {
     const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:L` });
@@ -356,48 +296,27 @@ class SheetsClient {
   }
   async getEmployeeMaster() {
     try {
-      const res = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G`,
-      });
+      const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G` });
       const rows = res.data.values || [];
       const employees = {};
       for (let i = 1; i < rows.length; i++) {
         const name = rows[i][0];
         if (name) {
-          employees[name] = {
-            status: rows[i][1] || '재직', 
-            joinDate: rows[i][2] || '2000-01-01', 
-            workType: rows[i][5] || '고정',
-            birthday: rows[i][6] ? rows[i][6].trim() : '' 
-          };
+          employees[name] = { status: rows[i][1] || '재직', joinDate: rows[i][2] || '2000-01-01', workType: rows[i][5] || '고정', birthday: rows[i][6] ? rows[i][6].trim() : '' };
         }
       }
       return employees;
     } catch (err) { return {}; }
   }
   async addEmployee(name, joinDate) {
-    await this.sheets.spreadsheets.values.append({
-      spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G`,
-      valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: [[name, '재직', joinDate, '', '자동등록', '고정', '']] },
-    });
+    await this.sheets.spreadsheets.values.append({ spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G`, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', requestBody: { values: [[name, '재직', joinDate, '', '자동등록', '고정', '']] } });
   }
   async sortSheet(sheetName) {
     try {
       const res = await this.sheets.spreadsheets.get({ spreadsheetId: this.sheetId });
       const sheet = res.data.sheets.find(s => s.properties.title === sheetName);
       if (!sheet) return;
-      await this.sheets.spreadsheets.batchUpdate({
-        spreadsheetId: this.sheetId,
-        requestBody: {
-          requests: [{
-            sortRange: {
-              range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 12 },
-              sortSpecs: [{ dimensionIndex: 0, sortOrder: 'ASCENDING' }, { dimensionIndex: 2, sortOrder: 'ASCENDING' }]
-            }
-          }]
-        }
-      });
+      await this.sheets.spreadsheets.batchUpdate({ spreadsheetId: this.sheetId, requestBody: { requests: [{ sortRange: { range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 12 }, sortSpecs: [{ dimensionIndex: 0, sortOrder: 'ASCENDING' }, { dimensionIndex: 2, sortOrder: 'ASCENDING' }] } }] } });
     } catch (err) {}
   }
 }
@@ -405,7 +324,7 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v17.8 (2분 주기 최적화 버전)');
+  console.log('  Slack 출퇴근 스마트 로거 v18.0 (익일 새벽 퇴근 풀커버 버전)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -417,7 +336,6 @@ async function main() {
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제', '생일(MM-DD)']);
   
   let existingRows = await sheets.readAll(sheetName);
-  
   for (let i = 1; i < existingRows.length; i++) {
     existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);
     if (existingRows[i][7]) existingRows[i][7] = normalizeSheetTime(existingRows[i][7]);
@@ -429,61 +347,32 @@ async function main() {
   const userMap = await slack.getUsers();
   const masterMap = await sheets.getEmployeeMaster();
   
-  const isInitialRun = existingRows.length < 5;
-  let oldest;
-  if (isInitialRun) { 
-    console.log(`\n[안내] 시트 데이터가 없으므로 Slack '전체 기간' 메시지를 수집합니다!`);
-    console.log(`[안내] API 보호를 위해 이번 최초 실행에서는 이모지 작업을 생략합니다.`);
-    oldest = '0'; 
-  } else {
-    // 💡 [2분 주기 최적화 핵심] 매번 30일치를 돌리면 한도초과가 나므로, 데이터가 기입된 평소에는 최근 '1일(24시간)' 데이터만 가져옵니다.
-    console.log(`\n[안내] 2분 단기 동기화를 위해 '최근 24시간 내' 데이터만 신속 수집합니다.`);
-    oldest = String(Math.floor(Date.now() / 1000) - (24 * 60 * 60)); 
+  const nameToSlackId = {};
+  for (const [id, name] of Object.entries(userMap)) {
+    nameToSlackId[cleanUserName(name)] = id;
   }
+  
+  const isInitialRun = existingRows.length < 5;
+  let oldest = isInitialRun ? '0' : String(Math.floor(Date.now() / 1000) - (24 * 60 * 60));
 
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   
   const firstActiveDate = {};
   for (let i = 1; i < existingRows.length; i++) {
     const date = existingRows[i][0];
-    const name = existingRows[i][2]; 
-    const note = existingRows[i][11] || ''; 
-    if (note.includes('미보고')) continue;
-    if (date && name) {
+    const name = existingRows[i][2];
+    if (date && name && !(existingRows[i][11] || '').includes('미보고')) {
       if (!firstActiveDate[name] || date < firstActiveDate[name]) firstActiveDate[name] = date;
     }
   }
-  for (const msg of messages) {
-    if (msg.subtype && msg.subtype !== 'message_changed') continue;
-    const date = getDateFromTs(msg.ts);
-    const rawName = userMap[msg.user] || msg.user;
-    const name = cleanUserName(rawName);
-    if (name && (!firstActiveDate[name] || date < firstActiveDate[name])) {
-      firstActiveDate[name] = date;
-    }
-  }
 
+  // 최종 활동일 추적
   const lastActiveDate = {};
   for (let i = 1; i < existingRows.length; i++) {
     const date = existingRows[i][0];
     const name = existingRows[i][2];
-    const status = existingRows[i][4];
-    if (date && name && status && !['결근', '휴무', '-'].includes(status)) {
-      if (!lastActiveDate[name] || date > lastActiveDate[name]) {
-        lastActiveDate[name] = date;
-      }
-    }
-  }
-  for (const msg of messages) {
-    if (msg.subtype && msg.subtype !== 'message_changed') continue;
-    const text = msg.text?.trim() || '';
-    if (!text) continue;
-    const dateStr = getDateFromTs(msg.ts);
-    const userName = cleanUserName(userMap[msg.user] || msg.user);
-    if (userName) {
-      if (!lastActiveDate[userName] || dateStr > lastActiveDate[userName]) {
-        lastActiveDate[userName] = dateStr;
-      }
+    if (date && name && !['결근', '휴무', '-'].includes(existingRows[i][4])) {
+      if (!lastActiveDate[name] || date > lastActiveDate[name]) lastActiveDate[name] = date;
     }
   }
 
@@ -495,47 +384,78 @@ async function main() {
 
     const dateStr = getDateFromTs(msg.ts);
     const userName = cleanUserName(userMap[msg.user] || msg.user);
+    if (!userName) continue;
 
     if (!masterMap[userName]) {
       const joinDate = firstActiveDate[userName] || dateStr;
-      console.log(`  [신규 등록] ${userName} 사원마스터에 추가 중...`);
       await sheets.addEmployee(userName, joinDate);
       masterMap[userName] = { status: '재직', joinDate: joinDate, workType: '고정', birthday: '' };
     }
 
-    if (!groupedMsgs[dateStr]) groupedMsgs[dateStr] = {};
-    if (!groupedMsgs[dateStr][userName]) groupedMsgs[dateStr][userName] = [];
-    groupedMsgs[dateStr][userName].push(msg);
+    // 💡 [핵심 추가] 새벽 퇴근 분기 처리 로직 (0시 ~ 새벽 5시 마감 조건)
+    const kstObj = getKstObj(msg.ts);
+    const hour = kstObj.getUTCHours();
+    const isClockOutMsg = text.includes('퇴근') || text.includes('퇴실');
+    
+    let targetDateStr = dateStr;
+    let isMidnightShift = false;
+
+    // 만약 새벽 0시 ~ 새벽 5시 사이에 보낸 퇴근 메시지라면 전날 기록으로 편입시킴
+    if (hour >= 0 && hour < 5 && isClockOutMsg && !text.includes('출근정정')) {
+      targetDateStr = getYesterdayDateStr(dateStr);
+      isMidnightShift = true;
+    }
+
+    // [퇴근정정] 수기 구문 파싱 처리
+    const dateMatch = text.match(/\[퇴근정정\]\s*(?:(\d{4})[-./])?(\d{1,2})[-./](\d{1,2})\s+(\d{1,2})[:시]\s*(\d{1,2})?/);
+    const timeMatch = text.match(/\[퇴근정정\]\s*(\d{1,2})[:시]\s*(\d{1,2})?/);
+
+    if (dateMatch) {
+      const year = dateMatch[1] || new Date(parseFloat(msg.ts) * 1000 + 9 * 60 * 60 * 1000).getFullYear();
+      targetDateStr = `${year}-${String(dateMatch[2]).padStart(2, '0')}-${String(dateMatch[3]).padStart(2, '0')}`;
+      msg.isCorrection = true;
+      let hr = parseInt(dateMatch[4], 10);
+      msg.correctionTime = hr * 60 + (dateMatch[5] ? parseInt(dateMatch[5], 10) : 0);
+      if (hr < 5) msg.correctionTime += 24 * 60; // 정정 입력 시간이 새벽 1시 등이면 25시로 매핑
+    } else if (timeMatch) {
+      msg.isCorrection = true;
+      let hr = parseInt(timeMatch[1], 10);
+      msg.correctionTime = hr * 60 + (timeMatch[2] ? parseInt(timeMatch[2], 10) : 0);
+      // 알림톡 등을 보고 당일 새벽에 정정글을 쓰는 경우 검증
+      if (hr < 5 && (hour >= 0 && hour < 6)) hr += 24; 
+      else if (hr < 5) hr += 24; 
+      msg.correctionTime = hr * 60 + (timeMatch[2] ? parseInt(timeMatch[2], 10) : 0);
+    }
+
+    if (!lastActiveDate[userName] || targetDateStr > lastActiveDate[userName]) {
+      if (!text.includes('결근') && !text.includes('연차')) lastActiveDate[userName] = targetDateStr;
+    }
+
+    msg.isMidnightShift = isMidnightShift;
+    if (!groupedMsgs[targetDateStr]) groupedMsgs[targetDateStr] = {};
+    if (!groupedMsgs[targetDateStr][userName]) groupedMsgs[targetDateStr][userName] = [];
+    groupedMsgs[targetDateStr][userName].push(msg);
   }
 
   const todayStr = getDateFromTs(Date.now() / 1000);
   let minDateStr = todayStr;
-  const msgDates = Object.keys(groupedMsgs).sort();
-  if (msgDates.length > 0) minDateStr = msgDates[0];
+  if (Object.keys(groupedMsgs).sort().length > 0) minDateStr = Object.keys(groupedMsgs).sort()[0];
   
   const allDays = [];
   for (let d = new Date(minDateStr); d <= new Date(todayStr); d.setDate(d.getDate() + 1)) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    allDays.push(`${y}-${m}-${day}`);
+    allDays.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
   }
 
-  const toAppend = [];
-  const toUpdate = [];
-  const reactionQueue = []; 
-  
+  const toAppend = []; const toUpdate = []; const reactionQueue = []; const dmQueue = [];
   const targetMembers = Object.keys(masterMap).filter(n => !masterMap[n].workType.includes('CEO'));
-
   const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const currentHour = nowKst.getUTCHours();
+  const currentHour = nowKst.getUTCHours(); const currentMinute = nowKst.getUTCMinutes();
 
   for (const date of allDays) {
     const dObj = new Date(date);
-    const dayOfWeek = dObj.getDay();
-    const dayName = DAY_NAMES[dayOfWeek];
+    const dayName = DAY_NAMES[dObj.getDay()];
     const holidayName = HOLIDAYS[date];
-    const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+    const isWeekend = (dObj.getDay() === 0 || dObj.getDay() === 6);
 
     for (const member of targetMembers) {
       const userJoinDate = firstActiveDate[member] || masterMap[member].joinDate;
@@ -545,184 +465,117 @@ async function main() {
       const rowIdx = existingRows.findIndex(r => r[0] === date && r[2] === member); 
       const row = rowIdx >= 0 ? existingRows[rowIdx] : null;
 
-      const isResigned = masterMap[member].status !== '재직' && masterMap[member].status !== 'active';
-      if (isResigned) {
+      // 퇴사자 사후 무보고 필터링
+      if (masterMap[member].status !== '재직' && masterMap[member].status !== 'active') {
         const lastActive = lastActiveDate[member];
         if (!lastActive || date > lastActive) {
-          if (row) {
-            const status = row[4];
-            if (['결근', '휴무'].includes(status) || row[11]?.includes('미보고')) {
-              toUpdate.push({ range: `'${sheetName}'!A${rowIdx + 1}:L${rowIdx + 1}`, values: [Array(12).fill('')] });
-            }
+          if (row && (['결근', '휴무'].includes(row[4]) || row[11]?.includes('미보고'))) {
+            toUpdate.push({ range: `'${sheetName}'!A${rowIdx + 1}:L${rowIdx + 1}`, values: [Array(12).fill('')] });
           }
-          continue; 
+          continue;
         }
       }
 
       let rawWorkType = masterMap[member].workType;
-      let workTypeKey = 'UNKNOWN';
-      if (rawWorkType.includes('고정')) workTypeKey = 'FIXED';
-      else if (rawWorkType.includes('유연')) workTypeKey = 'FLEXIBLE';
-      else if (rawWorkType.includes('아르바이트')) workTypeKey = 'PART_TIME';
-
+      let workTypeKey = rawWorkType.includes('고정') ? 'FIXED' : (rawWorkType.includes('유연') ? 'FLEXIBLE' : 'PART_TIME');
       const allText = msgs.map(m => m.text.replace(/\n/g, ' ')).join(' | ');
       let leaveStatus = extractLeaveStatus(allText);
 
-      // (1) 결근 및 미보고 처리
+      // (1) 결근 처리
       if (msgs.length === 0) {
         if (!row) {
-          if (date === todayStr && currentHour < 23) continue; 
-          if (masterMap[member].status !== '재직' && masterMap[member].status !== 'active') continue;
-          
-          let status = '결근';
-          let note = '평일 (미보고)';
+          if (date === todayStr && currentHour < 23) continue;
+          let status = '결근', note = '평일 (미보고)';
           if (holidayName) { status = '휴무'; note = `공휴일(${holidayName})`; }
           else if (isWeekend) { status = '휴무'; note = `주말(${dayName})`; }
+          let autoLeaveType = status === '결근' ? getLeaveTypeByTenure(userJoinDate, date) : '-';
           
-          let autoLeaveType = '-';
-          if (status === '결근') autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
-          
-          const mergedLeaveValue = leaveStatus || autoLeaveType;
-          
-          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '0', mergedLeaveValue, note];
-          toAppend.push(newRow);
-          existingRows.push(newRow); 
+          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '0', leaveStatus || autoLeaveType, note];
+          toAppend.push(newRow); existingRows.push(newRow);
         }
         continue;
       }
 
-      // (2) 출근 기록 처리
-      let times = [];
-      for (const m of msgs) times.push(...extractTimeFromText(m.text, m.ts));
+      // (2) 출퇴근 정산 처리
+      let times = []; let forcedEndMin = null;
+      for (const m of msgs) {
+        if (m.isCorrection) forcedEndMin = m.correctionTime;
+        else times.push(...extractTimeFromText(m.text, m.ts, m.isMidnightShift));
+      }
       times.sort((a, b) => a - b);
       
       const rawStartMin = times[0];
-      const endMin = times[times.length - 1];
+      let endMin = forcedEndMin !== null ? forcedEndMin : times[times.length - 1];
       const startMin = snapToNearestHour(rawStartMin);
 
-      let status = '출근';
-      let note = allText;
+      let status = '출근', note = allText;
+      if (holidayName || isWeekend) { status = '휴일근무'; note = `[${holidayName ? holidayName : dayName}] ` + allText; }
       
-      if (holidayName || isWeekend) {
-        status = '휴일근무';
-        note = `[${holidayName ? holidayName : dayName}] ` + allText;
-      }
-      
-      const hasClockIn = allText.includes('출근') || allText.includes('입실');
-      const hasClockOut = allText.includes('퇴근') || allText.includes('퇴실');
+      const hasClockIn = allText.includes('출근') || allText.includes('입실') || times.length > 0;
+      const hasClockOut = allText.includes('퇴근') || allText.includes('퇴실') || forcedEndMin !== null;
       const hasClockInAndOut = (hasClockIn && hasClockOut) || (endMin - rawStartMin >= 4 * 60);
 
       if (hasClockInAndOut) {
         if (leaveStatus === '반차' || leaveStatus === '조퇴') status = leaveStatus;
       } else {
-        if (['연차', '반차', '휴가', '조퇴', '결근', '예비군', '민방위'].includes(leaveStatus)) {
-          status = leaveStatus;
-        } else if (!hasClockIn && !hasClockOut) {
-          status = '단순메시지';
+        if (['연차', '반차', '휴가', '조퇴', '결근', '예비군', '민방위'].includes(leaveStatus)) status = leaveStatus;
+        else if (!hasClockIn && !hasClockOut) status = '단순메시지';
+      }
+
+      // 밤 23:50 미보고자 DM 전송 예약 대기열
+      if (date === todayStr && currentHour === 23 && currentMinute >= 50 && currentMinute <= 52 && hasClockIn && !hasClockOut && status !== '단순메시지') {
+        const slackId = nameToSlackId[member];
+        if (slackId) {
+          dmQueue.push({ userId: slackId, text: `안녕하세요 ${member}님! 오늘 출근 보고는 확인되었으나 아직 퇴근 보고가 누락된 상태입니다. 야근으로 인해 늦어지셨거나 깜빡하셨다면 근태 채널에 아래 양식으로 수정 메시지를 남겨주세요!\n\n*당일 퇴근 정정 예시:* \`[퇴근정정] 18:30\`\n*새벽 야근 정정 예시(새벽 1시 퇴근 시):* \`[퇴근정정] 25:00\` 또는 \`[퇴근정정] 01:00\`` });
         }
       }
 
-      // 이모지 로직
-      if (!isInitialRun && msgs.length > 0) {
+      // 이모지 적재 로직
+      if (!isInitialRun) {
         const isBirthday = masterMap[member].birthday && date.substring(5) === masterMap[member].birthday;
-
         for (const m of msgs) {
-          const alreadyReacted = m.reactions && m.reactions.some(r => r.users.includes(botUserId));
-          
-          if (!alreadyReacted) {
-            const mText = m.text || '';
-            const isMsgClockIn = mText.includes('출근') || mText.includes('입실');
-            const isMsgClockOut = mText.includes('퇴근') || mText.includes('퇴실');
-            
-            let emojisToAdd = [];
-            
-            if (isBirthday && (isMsgClockIn || isMsgClockOut)) {
-              emojisToAdd = getRandomEmojis(EMOJI_POOLS.birthday, 5);
-            } 
-            else if (isMsgClockOut) { 
-              emojisToAdd = getRandomEmojis(EMOJI_POOLS.clockOut, 1);
-            } 
-            else if (isMsgClockIn) {
-              emojisToAdd = getRandomEmojis(EMOJI_POOLS.clockIn, 1);
-            } 
-            else {
-              emojisToAdd = getRandomEmojis(EMOJI_POOLS.unknown, 1);
-            }
-            
-            for (const emoji of emojisToAdd) {
-              reactionQueue.push({ ts: m.ts, emoji: emoji });
-            }
+          if (!(m.reactions && m.reactions.some(r => r.users.includes(botUserId)))) {
+            let pool = m.text.includes('퇴근') || m.text.includes('퇴실') || m.isCorrection ? EMOJI_POOLS.clockOut : (m.text.includes('출근') || m.text.includes('입실') ? EMOJI_POOLS.clockIn : EMOJI_POOLS.unknown);
+            let emojis = isBirthday ? getRandomEmojis(EMOJI_POOLS.birthday, 5) : getRandomEmojis(pool, 1);
+            for (const em of emojis) reactionQueue.push({ ts: m.ts, emoji: em });
           }
         }
       }
 
-      let autoLeaveType = '-';
-      if (['연차', '반차', '휴가'].includes(status)) autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
-
+      let autoLeaveType = ['연차', '반차', '휴가'].includes(status) ? getLeaveTypeByTenure(userJoinDate, date) : '-';
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
       if (!['연차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
         if (workTypeKey === 'FIXED') analysis = analyzeFixed(startMin, endMin);
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(startMin, endMin);
-        else if (workTypeKey === 'PART_TIME') analysis = analyzePartTime(startMin, endMin);
+        else analysis = analyzePartTime(startMin, endMin);
       }
 
-      const mergedLeaveValue = leaveStatus || autoLeaveType;
-
       if (!row) {
-        const newRow = [
-          date, dayName, member, rawWorkType, status, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), mergedLeaveValue, note
-        ];
-        toAppend.push(newRow);
-        existingRows.push(newRow);
+        const newRow = [date, dayName, member, rawWorkType, status, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), leaveStatus || autoLeaveType, note];
+        toAppend.push(newRow); existingRows.push(newRow);
       } else {
         while (row.length < 12) row.push('');
-        
-        row[1] = dayName;
-        row[3] = rawWorkType;
-        row[4] = status;
-        row[5] = analysis.lateness;
-        row[6] = formatTimeFromMins(startMin);
-        row[7] = formatTimeFromMins(endMin);
-        row[8] = analysis.overtime;
-        row[9] = String(analysis.overtimeHours);
-        row[10] = mergedLeaveValue; 
-        row[11] = note; 
-
+        row[1] = dayName; row[3] = rawWorkType; row[4] = status; row[5] = analysis.lateness;
+        row[6] = formatTimeFromMins(startMin); row[7] = formatTimeFromMins(endMin);
+        row[8] = analysis.overtime; row[9] = String(analysis.overtimeHours); row[10] = leaveStatus || autoLeaveType; row[11] = note;
         toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:L${rowIdx + 1}`, values: [row.slice(1, 12)] });
       }
     }
   }
 
-  if (toAppend.length > 0) {
-    await sheets.sheets.spreadsheets.values.append({
-      spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:L`,
-      valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend },
-    });
-  }
-
-  if (toUpdate.length > 0) {
-    await sheets.sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: sheets.sheetId, requestBody: { valueInputOption: 'RAW', data: toUpdate }
-    });
-  }
-
+  if (toAppend.length > 0) await sheets.sheets.spreadsheets.values.append({ spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:L`, valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend } });
+  if (toUpdate.length > 0) await sheets.sheets.spreadsheets.values.batchUpdate({ spreadsheetId: sheets.sheetId, requestBody: { valueInputOption: 'RAW', data: toUpdate } });
   await sheets.sortSheet(sheetName);
 
-  if (reactionQueue.length > 0) {
-    console.log(`\n  [이모지 작업] 총 ${reactionQueue.length}개의 리액션을 슬랙에 신속 추가합니다...`);
-    for (const req of reactionQueue) {
-      await slack.addReaction(CONFIG.slack.channelId, req.ts, req.emoji);
-      // 💡 2분 주기에서는 새로 유입되는 메시지가 극히 소수이므로 대기 간격을 최소화(50ms)하여 실시간성을 극대화합니다.
-      await new Promise(resolve => setTimeout(resolve, 50));
+  if (dmQueue.length > 0) {
+    for (const dm of dmQueue) {
+      try { await slack.call('chat.postMessage', { channel: dm.userId, text: dm.text }); await new Promise(res => setTimeout(resolve, 300)); } catch (err) {}
     }
   }
-
-  console.log(`\n========================================`);
-  console.log(`  ✅ 출퇴근 기록 엔진 완벽 동기화 완료!`);
-  console.log(`========================================`);
+  if (reactionQueue.length > 0) {
+    for (const req of reactionQueue) { await slack.addReaction(CONFIG.slack.channelId, req.ts, req.emoji); await new Promise(res => setTimeout(res, 50)); }
+  }
+  console.log(`\n========================================\n  ✅ 출퇴근 기록 엔진 완벽 동기화 완료!\n========================================`);
 }
 
-main().catch(err => {
-  console.error('\n❌ 실행 중 오류 발생:', err);
-  process.exit(1);
-});
+main().catch(err => { console.error('\n❌ 실행 중 오류 발생:', err); process.exit(1); });
