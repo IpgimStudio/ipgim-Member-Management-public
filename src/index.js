@@ -29,11 +29,10 @@ if (!CONFIG.sheets.sheetNames) {
 }
 
 // ─────────────────── 상수 (휴일 & 요일) ───────────────────
-// ─────────────────── 상수 (휴일 & 요일) ───────────────────
 const HOLIDAYS = {
   // --- 2025년 ---
   "2025-01-01": "신정", 
-  "2025-01-27": "임시공휴일", // 새로 확정된 설 연휴 앞 임시공휴일
+  "2025-01-27": "임시공휴일", 
   "2025-01-28": "설날", 
   "2025-01-29": "설날", 
   "2025-01-30": "설날",
@@ -124,7 +123,6 @@ function normalizeSheetTime(val) {
   return strVal;
 }
 
-// 💡 입사 연차/월차 자동 판단 엔진 (만 1년 기준)
 function getLeaveTypeByTenure(joinDateStr, currentDateStr) {
   if (!joinDateStr || !currentDateStr) return '-';
   try {
@@ -167,17 +165,12 @@ function extractTimeFromText(text, ts) {
 }
 
 function extractLeaveStatus(text) {
-  // 1. 미래 시점이나 예정을 지칭하는 문맥 제거
   let cleanText = text.replace(/(내일|익일|모레|다음주|차주|다음 주|월요일|화요일|수요일|목요일|금요일)[^.!|\n]*(휴가|연차|반차|조퇴|결근|예비군|민방위)/g, '');
   cleanText = cleanText.replace(/(휴가|연차|반차|조퇴|결근|예비군|민방위)[^.!|\n]*(예정|계획)/g, '');
 
-  // 💡 2. 덕담/인사말 필터링 (명절/휴가/연휴 등 퇴근길 인사말 무력화)
-  // "즐거운 추석", "건강한 주말" 등 앞부분 수식어 감지
   cleanText = cleanText.replace(/(즐거|행복|좋은|잘|건강|풀|풀충전)[^.!|\n]*(명절|추석|연휴|휴가|주말)/g, '');
-  // "명절 잘 보내세요", "연휴 풀충전 하세요" 등 뒷부분 서술어 감지
   cleanText = cleanText.replace(/(명절|추석|연휴|휴가|주말)[^.!|\n]*(보내|되|쉬|다녀|만나|뵙|충전)/g, '');
 
-  // 3. 정제된 텍스트에서 최종 상태 추출
   if (cleanText.includes('연차')) return '연차';
   if (cleanText.includes('반차')) return '반차';
   if (cleanText.includes('휴가') || cleanText.includes('명절') || cleanText.includes('추석') || cleanText.includes('연휴')) return '휴가';
@@ -189,7 +182,6 @@ function extractLeaveStatus(text) {
   return '';
 }
 
-// 💡 야근 여부 분석 엔진 수정 (10분 이내 퇴근 시 정상 처리 적용)
 function analyzeFixed(startMin, endMin) {
   const workStart = 9 * 60; 
   const workEnd = 18 * 60; 
@@ -201,8 +193,8 @@ function analyzeFixed(startMin, endMin) {
   let overtimeHours = 0;
   if (endMin > workEnd) {
     const diff = endMin - workEnd;
-    if (diff <= 10) overtime = '없음'; // 💡 10분 이내는 정상(없음)
-    else if (diff <= 30) overtime = '경미한 연장'; // 💡 10분 초과 30분 이내는 경미한 연장
+    if (diff <= 10) overtime = '없음'; 
+    else if (diff <= 30) overtime = '경미한 연장'; 
     else {
       overtime = '야근';
       overtimeHours = Math.floor(diff / 60);
@@ -317,8 +309,8 @@ class SheetsClient {
     });
   }
   async readAll(sheetName) {
-    // 💡 열이 증가함에 따라 범위를 A:M으로 확장
-    const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:M` });
+    // 💡 열이 하나 줄어들어 범위를 A:L로 조정
+    const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:L` });
     return res.data.values || [];
   }
   async getEmployeeMaster() {
@@ -356,8 +348,8 @@ class SheetsClient {
         requestBody: {
           requests: [{
             sortRange: {
-              // 💡 endColumnIndex를 13(M열)으로 변경
-              range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 13 },
+              // 💡 endColumnIndex를 12(L열)로 변경
+              range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 12 },
               sortSpecs: [{ dimensionIndex: 0, sortOrder: 'ASCENDING' }, { dimensionIndex: 2, sortOrder: 'ASCENDING' }]
             }
           }]
@@ -370,15 +362,15 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v17.2 (연월차 구분 탑재)');
+  console.log('  Slack 출퇴근 스마트 로거 v17.3 (비고 열 통합 반영)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
   const sheetName = CONFIG.sheets.sheetNames.attendance;
   const masterSheetName = CONFIG.sheets.sheetNames.employee;
   
-  // 💡 '연월차구분' 열을 야근인정시간 뒤에 배치 (총 13개 열)
-  const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '휴가여부', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '연월차구분', '비고'];
+  // 💡 '휴가여부' 열을 없애고 맨 뒤의 '비고(휴가사유)' 열로 통합 (총 12개 열 구조)
+  const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '연월차구분', '비고(휴가사유)'];
   await sheets.ensureSheet(sheetName, HEADERS);
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제']);
   
@@ -386,8 +378,8 @@ async function main() {
   
   for (let i = 1; i < existingRows.length; i++) {
     existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);
+    if (existingRows[i][6]) existingRows[i][6] = normalizeSheetTime(existingRows[i][6]);
     if (existingRows[i][7]) existingRows[i][7] = normalizeSheetTime(existingRows[i][7]);
-    if (existingRows[i][8]) existingRows[i][8] = normalizeSheetTime(existingRows[i][8]);
   }
 
   const slack = new SlackClient(CONFIG.slack.token);
@@ -409,8 +401,8 @@ async function main() {
   for (let i = 1; i < existingRows.length; i++) {
     const date = existingRows[i][0];
     const name = existingRows[i][2]; 
-    const note = existingRows[i][12] || ''; // 💡 인덱스 조정 (비고는 이제 12번)
-    if (note.includes('미보고')) continue;
+    const finalNote = existingRows[i][11] || ''; // 💡 인덱스 한 칸씩 당겨짐 (비고는 이제 11번)
+    if (finalNote.includes('미보고')) continue;
     if (date && name) {
       if (!firstActiveDate[name] || date < firstActiveDate[name]) firstActiveDate[name] = date;
     }
@@ -504,19 +496,22 @@ async function main() {
           if (holidayName) { status = '휴무'; note = `공휴일(${holidayName})`; }
           else if (isWeekend) { status = '휴무'; note = `주말(${dayName})`; }
           
-          // 💡 평일 미보고인 경우 자동으로 근속연수를 계산하여 연차/월차 대상 표기
           let autoLeaveType = '-';
           if (status === '결근') {
             autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
           }
           
-          const newRow = [date, dayName, member, rawWorkType, status, leaveStatus, '-', '-', '-', '-', '0', autoLeaveType, note];
+          // 💡 휴가여부(leaveStatus)는 비어있으므로 기본 note를 할당
+          const finalMergedNote = leaveStatus || note;
+
+          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '0', autoLeaveType, finalMergedNote];
           toAppend.push(newRow);
           existingRows.push(newRow); 
         }
         continue;
       }
-// (2) 출근 기록 처리
+
+      // (2) 출근 기록 처리
       let times = [];
       for (const m of msgs) times.push(...extractTimeFromText(m.text, m.ts));
       times.sort((a, b) => a - b);
@@ -533,29 +528,23 @@ async function main() {
         note = `[${holidayName ? holidayName : dayName}] ` + allText;
       }
       
-      // 💡 [핵심 로직] 출퇴근 우선의 법칙
-      // 텍스트에 '출근'과 '퇴근'이 모두 명시되어 있거나, 첫 보고와 마지막 보고 간격이 4시간 이상인 경우 정상 출근으로 간주
       const hasClockInAndOut = (allText.includes('출근') && allText.includes('퇴근')) || (endMin - rawStartMin >= 4 * 60);
 
       if (hasClockInAndOut) {
-        // 출퇴근 기록이 확실하다면, '반차'나 '조퇴'만 근태 상태로 인정 (명절 인사말 등 오인식 휴가는 무시)
         if (leaveStatus === '반차' || leaveStatus === '조퇴') {
           status = leaveStatus;
         }
       } else {
-        // 출퇴근 기록이 없거나 비정상적으로 짧다면, 추출된 휴가/연차 등의 상태를 우선 적용
         if (['연차', '반차', '휴가', '조퇴', '결근', '예비군', '민방위'].includes(leaveStatus)) {
           status = leaveStatus;
         }
       }
 
-      // 휴가나 예비군 등을 실제로 사용한 날에도 근속 연수를 체크해 연/월차 여부를 대입
       let autoLeaveType = '-';
       if (['연차', '반차', '휴가'].includes(status)) {
         autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
       }
 
-      // 💡 연차/휴가/예비군/민방위 등 확정 상태일 경우, 지각 및 연장근무 분석 생략
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
       if (!['연차', '휴가', '결근', '예비군', '민방위'].includes(status)) {
         if (workTypeKey === 'FIXED') analysis = analyzeFixed(startMin, endMin);
@@ -563,37 +552,38 @@ async function main() {
         else if (workTypeKey === 'PART_TIME') analysis = analyzePartTime(startMin, endMin);
       }
 
+      // 💡 핵심 로직: 휴가여부와 비고 병합 (휴가여부 데이터 우선 순위 구현)
+      const finalMergedNote = leaveStatus || note;
 
       if (!row) {
         const newRow = [
-          date, dayName, member, rawWorkType, status, leaveStatus, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), autoLeaveType, note
+          date, dayName, member, rawWorkType, status, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), autoLeaveType, finalMergedNote
         ];
         toAppend.push(newRow);
         existingRows.push(newRow);
       } else {
-        while (row.length < 13) row.push('');
+        while (row.length < 12) row.push('');
         
         row[1] = dayName;
         row[3] = rawWorkType;
         row[4] = status;
-        row[5] = leaveStatus; 
-        row[6] = analysis.lateness;
-        row[7] = formatTimeFromMins(startMin);
-        row[8] = formatTimeFromMins(endMin);
-        row[9] = analysis.overtime;
-        row[10] = String(analysis.overtimeHours);
-        row[11] = autoLeaveType; // 💡 새 열 대입
-        row[12] = note; 
+        row[5] = analysis.lateness;
+        row[6] = formatTimeFromMins(startMin);
+        row[7] = formatTimeFromMins(endMin);
+        row[8] = analysis.overtime;
+        row[9] = String(analysis.overtimeHours);
+        row[10] = autoLeaveType; 
+        row[11] = finalMergedNote; // 💡 병합된 최종 텍스트 대입
 
-        toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:M${rowIdx + 1}`, values: [row.slice(1, 13)] });
+        toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:L${rowIdx + 1}`, values: [row.slice(1, 12)] });
       }
     }
   }
 
-  // 3. 일괄 쓰기 및 정렬 (범위 M열로 전면 확장)
+  // 3. 일괄 쓰기 및 정렬 (범위 L열로 전면 축소 및 조정)
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
-      spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:M`,
+      spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:L`,
       valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend },
     });
   }
