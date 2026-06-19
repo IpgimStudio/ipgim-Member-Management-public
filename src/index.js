@@ -167,16 +167,25 @@ function extractTimeFromText(text, ts) {
 }
 
 function extractLeaveStatus(text) {
-  if (text.includes('연차')) return '연차';
-  if (text.includes('반차')) return '반차';
-  if (text.includes('휴가') || text.includes('명절') || text.includes('추석')) return '휴가';
-  if (text.includes('조퇴')) return '조퇴';
-  if (text.includes('결근')) return '결근';
-  if (text.includes('예비군')) return '예비군'; // 💡 예비군 추가
-  if (text.includes('민방위')) return '민방위'; // 💡 민방위 추가
+  // 1. 미래 시점이나 예정을 지칭하는 문맥 제거 (정규식 필터링)
+  // 예: "익일은 개인 휴가", "내일 연차 씁니다", "다음주 예비군" 등을 찾아 해당 텍스트를 무효화시킵니다.
+  // [^.!|\n]* 는 마침표나 느낌표, 줄바꿈 등이 나오기 전까지의 문장 안에서만 묶어서 찾는다는 의미입니다.
+  let cleanText = text.replace(/(내일|익일|모레|다음주|차주|다음 주|월요일|화요일|수요일|목요일|금요일)[^.!|\n]*(휴가|연차|반차|조퇴|결근|예비군|민방위)/g, '');
+  
+  // 예: "연차 사용할 예정입니다", "휴가 계획입니다" 같은 문맥도 추가로 방어
+  cleanText = cleanText.replace(/(휴가|연차|반차|조퇴|결근|예비군|민방위)[^.!|\n]*(예정|계획)/g, '');
+
+  // 2. 정제된 텍스트(오늘 당일의 상태를 의미하는 부분)에서만 실제 상태를 추출
+  if (cleanText.includes('연차')) return '연차';
+  if (cleanText.includes('반차')) return '반차';
+  if (cleanText.includes('휴가') || cleanText.includes('명절') || cleanText.includes('추석')) return '휴가';
+  if (cleanText.includes('조퇴')) return '조퇴';
+  if (cleanText.includes('결근')) return '결근';
+  if (cleanText.includes('예비군')) return '예비군';
+  if (cleanText.includes('민방위')) return '민방위';
+  
   return '';
 }
-
 // 💡 야근 여부 분석 엔진 수정 (10분 이내 퇴근 시 정상 처리 적용)
 function analyzeFixed(startMin, endMin) {
   const workStart = 9 * 60; 
