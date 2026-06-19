@@ -292,9 +292,10 @@ class SheetsClient {
     await this.sheets.spreadsheets.values.update({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A1`, valueInputOption: 'RAW', requestBody: { values: [headerRow] } });
   }
   async readAll(sheetName) {
-    const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:L` });
+    const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:M` }); // A:L -> A:M 변경
     return res.data.values || [];
   }
+
   async getEmployeeMaster() {
     try {
       const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G` });
@@ -317,7 +318,7 @@ class SheetsClient {
       const res = await this.sheets.spreadsheets.get({ spreadsheetId: this.sheetId });
       const sheet = res.data.sheets.find(s => s.properties.title === sheetName);
       if (!sheet) return;
-      await this.sheets.spreadsheets.batchUpdate({ spreadsheetId: this.sheetId, requestBody: { requests: [{ sortRange: { range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 12 }, sortSpecs: [{ dimensionIndex: 0, sortOrder: 'ASCENDING' }, { dimensionIndex: 2, sortOrder: 'ASCENDING' }] } }] } });
+      await this.sheets.spreadsheets.batchUpdate({ spreadsheetId: this.sheetId, requestBody: { requests: [{ sortRange: { range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 13 }, sortSpecs: [{ dimensionIndex: 0, sortOrder: 'ASCENDING' }, { dimensionIndex: 2, sortOrder: 'ASCENDING' }] } }] } });
     } catch (err) {}
   }
 }
@@ -332,13 +333,14 @@ async function main() {
   const sheetName = CONFIG.sheets.sheetNames.attendance;
   const masterSheetName = CONFIG.sheets.sheetNames.employee;
   
-  const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '휴가/연월차구분', '비고'];
+  const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '실제출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '휴가/연월차구분', '비고'];
   await sheets.ensureSheet(sheetName, HEADERS);
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제', '생일(MM-DD)']);
   
   let existingRows = await sheets.readAll(sheetName);
   for (let i = 1; i < existingRows.length; i++) {
     existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);
+    if (existingRows[i][6]) existingRows[i][6] = normalizeSheetTime(existingRows[i][6]);
     if (existingRows[i][7]) existingRows[i][7] = normalizeSheetTime(existingRows[i][7]);
     if (existingRows[i][8]) existingRows[i][8] = normalizeSheetTime(existingRows[i][8]);
   }
@@ -473,7 +475,7 @@ async function main() {
         const lastActive = lastActiveDate[member];
         if (!lastActive || date > lastActive) {
           if (row && (['결근', '휴무'].includes(row[4]) || row[11]?.includes('미보고'))) {
-            toUpdate.push({ range: `'${sheetName}'!A${rowIdx + 1}:L${rowIdx + 1}`, values: [Array(12).fill('')] });
+            toUpdate.push({ range: `'${sheetName}'!A${rowIdx + 1}:M${rowIdx + 1}`, values: [Array(13).fill('')] });
           }
           continue;
         }
@@ -493,17 +495,28 @@ async function main() {
           else if (isWeekend) { status = '휴무'; note = `주말(${dayName})`; }
           let autoLeaveType = status === '결근' ? getLeaveTypeByTenure(userJoinDate, date) : '-';
           
-          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '0', leaveStatus || autoLeaveType, note];
+          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '-', '0', leaveStatus || autoLeaveType, note];
           toAppend.push(newRow); existingRows.push(newRow);
         }
         continue;
       }
 
       // (2) 출퇴근 정산 처리
-      let times = []; let forcedEndMin = null;
+      let times = []; 
+      let forcedEndMin = null;
+      let actualStartMin = null; // 💡 [추가됨] 실제 메시지 전송 시간
+
       for (const m of msgs) {
-        if (m.isCorrection) forcedEndMin = m.correctionTime;
-        else times.push(...extractTimeFromText(m.text, m.ts, m.isMidnightShift));
+        if (m.isCorrection) {
+          forcedEndMin = m.correctionTime;
+        } else {
+          times.push(...extractTimeFromText(m.text, m.ts, m.isMidnightShift));
+          // 최초 출근 보고 시점의 '실제 메시지 전송 시간'을 잡음
+          if (actualStartMin === null) {
+            const kst = getKstObj(m.ts);
+            actualStartMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+          }
+        }
       }
       times.sort((a, b) => a - b);
       
@@ -511,12 +524,14 @@ async function main() {
       let endMin = forcedEndMin !== null ? forcedEndMin : (times.length > 1 ? times[times.length - 1] : null);
       const startMin = snapToNearestHour(rawStartMin);
 
+      const latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
+
       let status = '출근', note = allText;
       if (holidayName || isWeekend) { status = '휴일근무'; note = `[${holidayName ? holidayName : dayName}] ` + allText; }
       
       const hasClockIn = allText.includes('출근') || allText.includes('입실') || times.length > 0;
       const hasClockOut = allText.includes('퇴근') || allText.includes('퇴실') || forcedEndMin !== null;
-      const hasClockInAndOut = (hasClockIn && hasClockOut) || (endMin - rawStartMin >= 4 * 60);
+      const hasClockInAndOut = (hasClockIn && hasClockOut) || (endMin !== null && endMin - rawStartMin >= 4 * 60);
 
       if (hasClockInAndOut) {
         if (leaveStatus === '반차' || leaveStatus === '조퇴') status = leaveStatus;
@@ -525,7 +540,6 @@ async function main() {
         else if (!hasClockIn && !hasClockOut) status = '단순메시지';
       }
 
-      // 밤 23:50 미보고자 DM 전송 예약 대기열
       if (date === todayStr && currentHour === 23 && currentMinute >= 50 && currentMinute <= 52 && hasClockIn && !hasClockOut && status !== '단순메시지') {
         const slackId = nameToSlackId[member];
         if (slackId) {
@@ -533,7 +547,6 @@ async function main() {
         }
       }
 
-      // 이모지 적재 로직 (★ date === todayStr 조건 추가로 오늘 메시지에만 이모지 작동)
       if (!isInitialRun && date === todayStr) {
         const isBirthday = masterMap[member].birthday && date.substring(5) === masterMap[member].birthday;
         for (const m of msgs) {
@@ -548,20 +561,27 @@ async function main() {
       let autoLeaveType = ['연차', '월차', '반차', '휴가'].includes(status) ? getLeaveTypeByTenure(userJoinDate, date) : '-';
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
       if (!['연차', '월차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
-        if (workTypeKey === 'FIXED') analysis = analyzeFixed(startMin, endMin);
-        else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(startMin, endMin);
-        else analysis = analyzePartTime(startMin, endMin);
+        if (workTypeKey === 'FIXED') analysis = analyzeFixed(latenessCheckMin, endMin);
+        else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(latenessCheckMin, endMin);
+        else analysis = analyzePartTime(latenessCheckMin, endMin);
       }
 
       if (!row) {
-        const newRow = [date, dayName, member, rawWorkType, status, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), leaveStatus || autoLeaveType, note];
+        const newRow = [
+          date, dayName, member, rawWorkType, status, analysis.lateness, 
+          formatTimeFromMins(startMin), formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin), formatTimeFromMins(endMin), 
+          analysis.overtime, String(analysis.overtimeHours), leaveStatus || autoLeaveType, note
+        ];
         toAppend.push(newRow); existingRows.push(newRow);
       } else {
-        while (row.length < 12) row.push('');
+        while (row.length < 13) row.push(''); 
         row[1] = dayName; row[3] = rawWorkType; row[4] = status; row[5] = analysis.lateness;
-        row[6] = formatTimeFromMins(startMin); row[7] = formatTimeFromMins(endMin);
-        row[8] = analysis.overtime; row[9] = String(analysis.overtimeHours); row[10] = leaveStatus || autoLeaveType; row[11] = note;
-        toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:L${rowIdx + 1}`, values: [row.slice(1, 12)] });
+        row[6] = formatTimeFromMins(startMin); 
+        row[7] = formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin); 
+        row[8] = formatTimeFromMins(endMin);
+        row[9] = analysis.overtime; row[10] = String(analysis.overtimeHours); row[11] = leaveStatus || autoLeaveType; row[12] = note;
+        
+        toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:M${rowIdx + 1}`, values: [row.slice(1, 13)] });
       }
     }
   }
