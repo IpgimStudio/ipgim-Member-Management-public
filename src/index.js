@@ -378,8 +378,10 @@ async function main() {
 
   const groupedMsgs = {};
   for (const msg of messages) {
-    if (msg.subtype && msg.subtype !== 'message_changed') continue; 
-    const text = msg.text?.trim() || '';
+  if (msg.bot_id || msg.subtype === 'bot_message') continue; 
+  if (msg.subtype && !['message_changed', 'file_share'].includes(msg.subtype)) continue; 
+
+  const text = msg.text?.trim() || '';
     if (!text) continue;
 
     const dateStr = getDateFromTs(msg.ts);
@@ -505,7 +507,7 @@ async function main() {
       times.sort((a, b) => a - b);
       
       const rawStartMin = times[0];
-      let endMin = forcedEndMin !== null ? forcedEndMin : times[times.length - 1];
+      let endMin = forcedEndMin !== null ? forcedEndMin : (times.length > 1 ? times[times.length - 1] : null);
       const startMin = snapToNearestHour(rawStartMin);
 
       let status = '출근', note = allText;
