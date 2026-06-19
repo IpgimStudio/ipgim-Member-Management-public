@@ -132,7 +132,6 @@ class SheetsClient {
     return latest === 0 ? null : String(latest);
   }
 
-  // 사원마스터 전체 데이터 로드
   async getEmployeeMaster() {
     try {
       const res = await this.sheets.spreadsheets.values.get({
@@ -147,7 +146,7 @@ class SheetsClient {
           employees[name] = {
             status: rows[i][1] || 'active',
             joinDate: rows[i][2] || '2000-01-01',
-            workType: rows[i][5] || '고정' // F열: 근무제 (고정, 유연, 아르바이트 등)
+            workType: rows[i][5] || '고정' 
           };
         }
       }
@@ -158,7 +157,6 @@ class SheetsClient {
     }
   }
 
-  // 신규 사원 자동 등록 (F열 기본값 '고정')
   async addEmployee(name, joinDate) {
     await this.sheets.spreadsheets.values.append({
       spreadsheetId: this.sheetId,
@@ -227,7 +225,7 @@ function parseAttendanceMessage(msg, today, userMap, masterMap) {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 마스터 로거 v7.0 실행');
+  console.log('  Slack 출퇴근 마스터 로거 v8.0 실행');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -246,14 +244,42 @@ async function main() {
   
   // 사원마스터 데이터 로드
   const masterMap = await sheets.getEmployeeMaster();
+  const toAppend = [];
+  const toUpdate = [];
+
+  // 0. [핵심] 사원마스터 변경 사항을 과거 출퇴근 기록에 자동 동기화 (Retroactive Sync)
+  let syncCount = 0;
+  for (let i = 1; i < existingRows.length; i++) {
+    const row = existingRows[i];
+    while (row.length < 11) row.push(''); // 배열 길이 맞추기
+
+    const name = row[1];
+    const currentWorkType = row[4] || '고정';
+    const currentStatus = row[5] || '정상';
+    const masterWorkType = masterMap[name]?.workType;
+
+    // 만약 시트에 '고정'으로 되어 있는데 사원마스터가 다르면 업데이트
+    if (masterWorkType && currentWorkType === '고정' && masterWorkType !== '고정') {
+      row[4] = masterWorkType; // 메모리 업데이트
+      toUpdate.push({ range: `'${sheetName}'!E${i + 1}`, values: [[masterWorkType]] });
+      
+      // 아르바이트로 변경 시, 짧은 근무로 찍힌 '확인(반차/조퇴)' 억울한 마크 해제
+      if (masterWorkType === '아르바이트' && currentStatus === '확인(반차/조퇴)') {
+        row[5] = '정상';
+        toUpdate.push({ range: `'${sheetName}'!F${i + 1}`, values: [['정상']] });
+      }
+      syncCount++;
+    }
+  }
+  if (syncCount > 0) {
+    console.log(`\n[마스터 동기화] 과거 기록 ${syncCount}건의 근무제/상태를 사원마스터 기준으로 자동 수정합니다!`);
+  }
 
   const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
   console.log(`\n--- Slack 채널 메시지 수집 중... ---`);
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   console.log(`[Slack] 처리할 새 메시지: ${messages.length}건\n`);
 
-  const toAppend = [];
-  const toUpdate = [];
   let parsedCount = 0;
 
   // 1. 메시지 파싱 및 출퇴근 기록 처리
@@ -355,7 +381,6 @@ async function main() {
   const minDateObj = new Date(sortedDates[0]);
   const todayObj = new Date(todayStr);
 
-  // minDate부터 오늘까지 하루도 빠짐없이 배열 생성
   const allDays = [];
   for (let d = new Date(minDateObj); d <= todayObj; d.setDate(d.getDate() + 1)) {
     const y = d.getFullYear();
@@ -370,16 +395,14 @@ async function main() {
     const reportedNames = new Set(todayRecords.map(r => r[1]));
 
     for (const member of activeMembers) {
-      // 입사일 이전 날짜는 검사하지 않음
       if (targetDate < masterMap[member].joinDate) continue;
 
       if (!reportedNames.has(member)) {
-        // 빈 slack_ts('')를 넣어 다음 수집 시 TS 최신화에 영향을 주지 않도록 함
         const newRow = [
           targetDate, member, '', '', masterMap[member].workType, '확인(연차/결근)', '', '', '미보고 (자동생성)', '', 'slack-logger'
         ];
         toAppend.push(newRow);
-        existingRows.push([...newRow]); // 당일 루프 중복 방지용
+        existingRows.push([...newRow]);
         reportedNames.add(member);
         missingCount++;
       }
@@ -411,7 +434,7 @@ async function main() {
   }
 
   console.log(`\n========================================`);
-  console.log(`  ✅ 전체 처리 완료 (메시지: ${parsedCount}건 / 미보고 생성: ${missingCount}건)`);
+  console.log(`  ✅ 전체 처리 완료 (동기화: ${syncCount} / 파싱: ${parsedCount} / 미보고: ${missingCount})`);
   console.log(`========================================`);
 }
 
