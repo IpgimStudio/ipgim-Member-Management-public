@@ -390,7 +390,13 @@ async function main() {
 
   const toAppend = [];
   const toUpdate = [];
-  const activeMembers = Object.keys(masterMap).filter(n => masterMap[n].status === '재직' || masterMap[n].status === 'active');
+  
+  // 💡 [수정됨] CEO 직급을 제외한 '재직/active' 상태인 멤버만 활성 멤버로 추출합니다.
+  const activeMembers = Object.keys(masterMap).filter(n => 
+    (masterMap[n].status === '재직' || masterMap[n].status === 'active') &&
+    !masterMap[n].workType.includes('CEO')
+  );
+
   const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const currentHour = nowKst.getUTCHours();
 
