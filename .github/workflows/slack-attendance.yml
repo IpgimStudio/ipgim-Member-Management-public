@@ -7,18 +7,12 @@ on:
     - cron: '*/10 0 * * *'      # KST 09:00~09:50 (10분 — 오전 집중)
     - cron: '*/10 1-8 * * *'    # KST 10:00~17:50 (10분 — 업무시간)
     - cron: '*/5 9-11 * * *'    # KST 18:00~20:55 (5분 — 퇴근 집중)
-  workflow_dispatch:
-    inputs:
-      lookback_minutes:
-        description: '조회할 과거 범위 (분)'
-        required: false
-        default: '30'
-        type: string
+  workflow_dispatch:  # 수동 실행용
 
 jobs:
   fetch-and-log:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10  # 최초 1회 풀 스캔 대비
 
     steps:
       - name: Checkout repository
@@ -39,5 +33,4 @@ jobs:
           GOOGLE_SERVICE_EMAIL: ${{ secrets.GOOGLE_SERVICE_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-          LOOKBACK_MINUTES: ${{ inputs.lookback_minutes || '30' }}
         run: node src/index.js
