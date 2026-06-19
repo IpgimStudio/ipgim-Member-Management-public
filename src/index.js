@@ -330,9 +330,10 @@ async function main() {
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
-  const sheetName = CONFIG.sheets.sheetNames.attendance;
+  const currentYear = new Date(Date.now() + 9 * 60 * 60 * 1000).getFullYear();
+  const sheetName = `${CONFIG.sheets.sheetNames.attendance}_${currentYear}`;
   const masterSheetName = CONFIG.sheets.sheetNames.employee;
-  
+    
   const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '실제출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '휴가/연월차구분', '비고'];
   await sheets.ensureSheet(sheetName, HEADERS);
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제', '생일(MM-DD)']);
