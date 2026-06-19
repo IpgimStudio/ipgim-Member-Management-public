@@ -23,26 +23,28 @@ if (process.env.GOOGLE_PRIVATE_KEY) CONFIG.sheets.privateKey = process.env.GOOGL
 
 if (!CONFIG.sheets.sheetNames) {
   CONFIG.sheets.sheetNames = { 
-    attendance: '출퇴근기록_v3',
+    attendance: '출퇴근기록_v4', 
     employee: '사원마스터'
   };
 }
 
 // ─────────────────── 상수 (휴일 & 요일) ───────────────────
 const HOLIDAYS = {
+  // 2025년 공휴일 + 지정일
   "2025-01-01": "신정", "2025-01-28": "설날", "2025-01-29": "설날", "2025-01-30": "설날",
-  "2025-03-01": "삼일절", "2025-03-03": "대체공휴일", "2025-05-05": "어린이날", "2025-05-06": "대체공휴일(석가탄신일)",
-  "2025-06-06": "현충일", "2025-08-15": "광복절", "2025-10-03": "개천절", "2025-10-05": "추석",
+  "2025-03-01": "삼일절", "2025-03-03": "대체공휴일", "2025-05-01": "근로자의 날", "2025-05-05": "어린이날", "2025-05-06": "대체공휴일(석가탄신일)",
+  "2025-06-06": "현충일", "2025-07-17": "제헌절", "2025-08-15": "광복절", "2025-10-03": "개천절", "2025-10-05": "추석",
   "2025-10-06": "추석", "2025-10-07": "추석", "2025-10-08": "대체공휴일", "2025-10-09": "한글날", "2025-12-25": "성탄절",
+  // 2026년 공휴일 + 지정일
   "2026-01-01": "신정", "2026-02-16": "설날", "2026-02-17": "설날", "2026-02-18": "설날",
-  "2026-03-01": "삼일절", "2026-03-02": "대체공휴일", "2026-05-05": "어린이날", "2026-05-24": "석가탄신일",
-  "2026-05-25": "대체공휴일", "2026-06-06": "현충일", "2026-08-15": "광복절", "2026-08-17": "대체공휴일",
+  "2026-03-01": "삼일절", "2026-03-02": "대체공휴일", "2026-05-01": "근로자의 날", "2026-05-05": "어린이날", "2026-05-24": "석가탄신일",
+  "2026-05-25": "대체공휴일", "2026-06-06": "현충일", "2026-07-17": "제헌절", "2026-08-15": "광복절", "2026-08-17": "대체공휴일",
   "2026-09-24": "추석", "2026-09-25": "추석", "2026-09-26": "추석", "2026-10-03": "개천절",
   "2026-10-05": "대체공휴일", "2026-10-09": "한글날", "2026-12-25": "성탄절"
 };
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
-// ─────────────────── 유틸리티 ───────────────────
+// ─────────────────── 유틸리티 및 분석 엔진 ───────────────────
 function formatTimeFromMins(totalMinutes) {
   if (totalMinutes === undefined || totalMinutes === null) return '-';
   const h = Math.floor(totalMinutes / 60);
@@ -59,7 +61,6 @@ function getKstObj(ts) {
   return new Date(parseFloat(ts) * 1000 + 9 * 60 * 60 * 1000);
 }
 
-// 💡 [수정됨] 날짜 복구기 (45818 -> 2025-06-10)
 function normalizeSheetDate(val) {
   if (!val) return '';
   const strVal = String(val).trim();
@@ -76,11 +77,9 @@ function normalizeSheetDate(val) {
   return clean.length === 10 ? clean : strVal;
 }
 
-// 💡 [신규] 시간 복구기 (0.3743055556 -> 08:59)
 function normalizeSheetTime(val) {
   if (!val || val === '-') return '-';
   const strVal = String(val).trim();
-  // 구글 시트의 시간 소수점 형태인지 감지
   if (/^0\.\d+$/.test(strVal)) {
     const totalMinutes = Math.round(parseFloat(strVal) * 24 * 60);
     const h = Math.floor(totalMinutes / 60);
@@ -93,6 +92,11 @@ function normalizeSheetTime(val) {
 function cleanUserName(rawName) {
   if (!rawName) return '알 수 없음';
   return rawName.replace(/\s*[\(\[\{<].*?[\)\]\}>]\s*/g, '').trim();
+}
+
+// 💡 [핵심] 가장 가까운 1시간(정시) 단위로 스냅하는 함수
+function snapToNearestHour(minutes) {
+  return Math.round(minutes / 60) * 60;
 }
 
 function extractTimeFromText(text, ts) {
@@ -247,19 +251,8 @@ class SheetsClient {
     });
   }
   async readAll(sheetName) {
-    const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:N` });
+    const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:L` });
     return res.data.values || [];
-  }
-  getLatestSlackTs(rows) {
-    if (!rows || rows.length < 2) return null;
-    let latest = 0;
-    for (let i = 1; i < rows.length; i++) {
-      const tsStr = String(rows[i][12] || ''); 
-      if (!tsStr || tsStr.startsWith('auto')) continue;
-      const ts = parseFloat(tsStr);
-      if (!isNaN(ts) && ts > latest) latest = ts;
-    }
-    return latest === 0 ? null : String(latest);
   }
   async getEmployeeMaster() {
     try {
@@ -296,7 +289,7 @@ class SheetsClient {
         requestBody: {
           requests: [{
             sortRange: {
-              range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 14 },
+              range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 12 },
               sortSpecs: [{ dimensionIndex: 0, sortOrder: 'ASCENDING' }, { dimensionIndex: 2, sortOrder: 'ASCENDING' }]
             }
           }]
@@ -309,40 +302,39 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v15.1 (Raw Format 강제)');
+  console.log('  Slack 출퇴근 스마트 로거 v17.0 (1시간 정시 스냅 적용)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
   const sheetName = CONFIG.sheets.sheetNames.attendance;
   const masterSheetName = CONFIG.sheets.sheetNames.employee;
   
-  const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '휴가여부', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '비고', 'slack_ts', '출처'];
+  const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '휴가여부', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '비고'];
   await sheets.ensureSheet(sheetName, HEADERS);
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제']);
   
   let existingRows = await sheets.readAll(sheetName);
   
-  // 💡 [수정됨] 기존에 깨져있는 날짜와 시간을 메모리 상에서 완벽히 복구합니다.
+  // 데이터 복원 및 정규화
   for (let i = 1; i < existingRows.length; i++) {
-    existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);  // 날짜 복구
-    existingRows[i][7] = normalizeSheetTime(existingRows[i][7]);  // 출근시간 복구
-    existingRows[i][8] = normalizeSheetTime(existingRows[i][8]);  // 퇴근시간 복구
+    existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);
+    existingRows[i][7] = normalizeSheetTime(existingRows[i][7]);
+    existingRows[i][8] = normalizeSheetTime(existingRows[i][8]);
   }
 
-  const lastTs = sheets.getLatestSlackTs(existingRows);
   const slack = new SlackClient(CONFIG.slack.token);
   const userMap = await slack.getUsers();
   const masterMap = await sheets.getEmployeeMaster();
   
-  const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
+  const oldest = String(Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60));
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   
   const firstActiveDate = {};
   for (let i = 1; i < existingRows.length; i++) {
     const date = existingRows[i][0];
     const name = existingRows[i][2]; 
-    const tsStr = existingRows[i][12]; 
-    if (!tsStr || String(tsStr).startsWith('auto')) continue;
+    const note = existingRows[i][11] || ''; 
+    if (note.includes('미보고')) continue;
     if (date && name) {
       if (!firstActiveDate[name] || date < firstActiveDate[name]) firstActiveDate[name] = date;
     }
@@ -368,7 +360,7 @@ async function main() {
 
     if (!masterMap[userName]) {
       const joinDate = firstActiveDate[userName] || dateStr;
-      console.log(`  [신규 등록] ${userName} (입사일: ${joinDate}) 사원마스터에 추가 중...`);
+      console.log(`  [신규 등록] ${userName} 사원마스터에 추가 중...`);
       await sheets.addEmployee(userName, joinDate);
       masterMap[userName] = { status: '재직', joinDate: joinDate, workType: '고정' };
     }
@@ -383,11 +375,6 @@ async function main() {
   const msgDates = Object.keys(groupedMsgs).sort();
   if (msgDates.length > 0) minDateStr = msgDates[0];
   
-  const rowDates = existingRows.slice(1).map(r => r[0]).filter(Boolean).sort();
-  if (rowDates.length > 0 && rowDates[rowDates.length - 1] < minDateStr) {
-    minDateStr = rowDates[rowDates.length - 1]; 
-  }
-
   const allDays = [];
   for (let d = new Date(minDateStr); d <= new Date(todayStr); d.setDate(d.getDate() + 1)) {
     const y = d.getFullYear();
@@ -426,6 +413,7 @@ async function main() {
       const allText = msgs.map(m => m.text.replace(/\n/g, ' ')).join(' | ');
       let leaveStatus = extractLeaveStatus(allText);
 
+      // (1) 결근 및 미보고 처리
       if (msgs.length === 0) {
         if (!row) {
           if (date === todayStr && currentHour < 23) continue; 
@@ -435,20 +423,23 @@ async function main() {
           if (holidayName) { status = '휴무'; note = `공휴일(${holidayName})`; }
           else if (isWeekend) { status = '휴무'; note = `주말(${dayName})`; }
           
-          const fakeTs = `auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-          const newRow = [date, dayName, member, rawWorkType, status, leaveStatus, '-', '-', '-', '-', '0', note, fakeTs, 'slack-logger'];
+          const newRow = [date, dayName, member, rawWorkType, status, leaveStatus, '-', '-', '-', '-', '0', note];
           toAppend.push(newRow);
           existingRows.push(newRow); 
         }
         continue;
       }
 
+      // (2) 출근 기록 처리 (1시간 단위 정시 스냅핑 반영)
       let times = [];
       for (const m of msgs) times.push(...extractTimeFromText(m.text, m.ts));
       times.sort((a, b) => a - b);
       
-      const startMin = times[0];
+      const rawStartMin = times[0];
       const endMin = times[times.length - 1];
+
+      // 💡 [핵심] 출근 시간을 가장 가까운 정시(1시간 단위)로 반올림하여 스냅
+      const startMin = snapToNearestHour(rawStartMin);
 
       let status = '출근';
       let note = allText;
@@ -463,16 +454,14 @@ async function main() {
       else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(startMin, endMin);
       else if (workTypeKey === 'PART_TIME') analysis = analyzePartTime(startMin, endMin);
 
-      const lastTs = msgs[msgs.length - 1].ts;
-
       if (!row) {
         const newRow = [
-          date, dayName, member, rawWorkType, status, leaveStatus, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), note, lastTs, 'slack-logger'
+          date, dayName, member, rawWorkType, status, leaveStatus, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), note
         ];
         toAppend.push(newRow);
         existingRows.push(newRow);
       } else {
-        while (row.length < 14) row.push('');
+        while (row.length < 12) row.push('');
         
         row[1] = dayName;
         row[3] = rawWorkType;
@@ -484,29 +473,23 @@ async function main() {
         row[9] = analysis.overtime;
         row[10] = String(analysis.overtimeHours);
         row[11] = note; 
-        row[12] = lastTs;
 
-        toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:M${rowIdx + 1}`, values: [row.slice(1, 13)] });
+        toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:L${rowIdx + 1}`, values: [row.slice(1, 12)] });
       }
     }
   }
 
-  // 💡 [수정됨] valueInputOption을 'RAW'로 변경하여 구글 시트의 자동 숫자 변환을 강제 차단합니다.
+  // 3. 일괄 쓰기 및 정렬 (RAW 강제하여 숫자 깨짐 방지)
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
-      spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:N`,
-      valueInputOption: 'RAW', // <-- 숫자로 깨지는 현상 차단
-      insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend },
+      spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:L`,
+      valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend },
     });
   }
 
   if (toUpdate.length > 0) {
     await sheets.sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: sheets.sheetId, 
-      requestBody: { 
-        valueInputOption: 'RAW', // <-- 숫자로 깨지는 현상 차단
-        data: toUpdate 
-      }
+      spreadsheetId: sheets.sheetId, requestBody: { valueInputOption: 'RAW', data: toUpdate }
     });
   }
 
