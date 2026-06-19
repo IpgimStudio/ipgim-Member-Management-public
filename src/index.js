@@ -79,12 +79,29 @@ const HOLIDAYS = {
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
 const EMOJI_POOLS = {
-  clockIn: ['muscle', 'fire', 'sparkles', 'star2', 'coffee', 'sun_with_face', 'rocket', 'v', 'blush', 'grinning'],
-  clockOut: ['wave', 'clap', '100', 'beers', 'moon', 'zzz', 'tada', 'thumbsup', 'star-struck', 'heart_eyes', 'relaxed'],
-  birthday: ['partying_face', 'birthday', 'cake', 'confetti_ball', 'gift', 'balloon', 'tada', 'clinking_glasses', 'crown', 'sparkler'],
-  unknown: ['question']
+  // ☀️ 출근 (에너지, 아침, 의지, 업무 시작)
+  clockIn: [
+    'muscle', 'fire', 'sparkles', 'star2', 'coffee', 'sun_with_face', 'rocket', 'v', 'blush', 'grinning',
+    'sunrise', 'zap', 'punch', 'briefcase', 'computer', 'raising_hand', 'smile', 'sunglasses', 'hero'
+  ],
+  
+  // 🌙 퇴근 (휴식, 귀가, 수고, 축하, 해방)
+  clockOut: [
+    'wave', 'clap', '100', 'beers', 'moon', 'zzz', 'tada', 'thumbsup', 'star-struck', 'heart_eyes', 'relaxed',
+    'house', 'night_with_stars', 'raised_hands', 'checkered_flag', 'couch_and_lamp', 'video_game', 'beer', 'runner', 'dizzy_face'
+  ],
+  
+  // 🎂 생일 (파티, 축하, 화려함)
+  birthday: [
+    'partying_face', 'birthday', 'cake', 'confetti_ball', 'gift', 'balloon', 'tada', 'clinking_glasses', 'crown', 'sparkler',
+    'champagne', 'cupcake', 'fireworks', 'bouquet', 'gem', 'dancer', 'musical_note'
+  ],
+  
+  // 🤔 단순메시지/알 수 없음 (생각, 확인 중, 봇의 반응)
+  unknown: [
+    'question'
+  ]
 };
-
 // ─────────────────── 유틸리티 및 분석 엔진 ───────────────────
 function getRandomEmojis(pool, count) {
   const shuffled = [...pool].sort(() => 0.5 - Math.random());
