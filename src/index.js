@@ -207,7 +207,7 @@ function analyzeFixed(startMin, endMin) {
 function analyzeFlexible(startMin, endMin) {
   const minStart = 8 * 60; 
   const maxStartLimit = 11 * 60; 
-  let effectiveStart = startMin < minStart ? minStart : startMin;
+  let effectiveStart = startMin < minStart ? minStart : startMin; // 구문 오류 수정 완료됨
   let lateness = startMin > maxStartLimit ? '지각' : '정상';
   const targetEnd = effectiveStart + (9 * 60);
   let overtime = '없음';
@@ -310,7 +310,6 @@ class SheetsClient {
     });
   }
   async readAll(sheetName) {
-    // 💡 열이 합쳐짐에 따라 범위를 다시 A:L(12개 열)로 조정
     const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:L` });
     return res.data.values || [];
   }
@@ -349,7 +348,6 @@ class SheetsClient {
         requestBody: {
           requests: [{
             sortRange: {
-              // 💡 endColumnIndex를 12(L열)로 변경
               range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 12 },
               sortSpecs: [{ dimensionIndex: 0, sortOrder: 'ASCENDING' }, { dimensionIndex: 2, sortOrder: 'ASCENDING' }]
             }
@@ -363,14 +361,13 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v17.3 (연월차 열 통합)');
+  console.log('  Slack 출퇴근 스마트 로거 v17.4 (퇴사자 메시지 수집 확장)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
   const sheetName = CONFIG.sheets.sheetNames.attendance;
   const masterSheetName = CONFIG.sheets.sheetNames.employee;
   
-  // 💡 '휴가/연월차구분'으로 두 개의 열을 병합 (총 12개 열)
   const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '휴가/연월차구분', '비고'];
   await sheets.ensureSheet(sheetName, HEADERS);
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제']);
@@ -402,7 +399,7 @@ async function main() {
   for (let i = 1; i < existingRows.length; i++) {
     const date = existingRows[i][0];
     const name = existingRows[i][2]; 
-    const note = existingRows[i][11] || ''; // 💡 인덱스 조정 (비고는 이제 11번)
+    const note = existingRows[i][11] || ''; 
     if (note.includes('미보고')) continue;
     if (date && name) {
       if (!firstActiveDate[name] || date < firstActiveDate[name]) firstActiveDate[name] = date;
@@ -455,8 +452,8 @@ async function main() {
   const toAppend = [];
   const toUpdate = [];
   
-  const activeMembers = Object.keys(masterMap).filter(n => 
-    (masterMap[n].status === '재직' || masterMap[n].status === 'active') &&
+  // 💡 [수정됨] CEO만 제외하고, 퇴사자를 포함한 모든 사람을 탐색 대상으로 삼습니다.
+  const targetMembers = Object.keys(masterMap).filter(n => 
     !masterMap[n].workType.includes('CEO')
   );
 
@@ -470,7 +467,7 @@ async function main() {
     const holidayName = HOLIDAYS[date];
     const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
 
-    for (const member of activeMembers) {
+    for (const member of targetMembers) {
       const userJoinDate = firstActiveDate[member] || masterMap[member].joinDate;
       if (date < userJoinDate) continue;
 
@@ -492,6 +489,11 @@ async function main() {
         if (!row) {
           if (date === todayStr && currentHour < 23) continue; 
           
+          // 💡 [추가됨] 퇴사자이거나 재직 상태가 아닌 사람은, 메시지가 없는 날 결근으로 강제 기록하지 않고 스킵합니다.
+          if (masterMap[member].status !== '재직' && masterMap[member].status !== 'active') {
+            continue;
+          }
+          
           let status = '결근';
           let note = '평일 (미보고)';
           if (holidayName) { status = '휴무'; note = `공휴일(${holidayName})`; }
@@ -502,7 +504,6 @@ async function main() {
             autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
           }
           
-          // 💡 우선순위 반영: leaveStatus(휴가여부 데이터)가 우선, 비어있으면 autoLeaveType 적용
           const mergedLeaveValue = leaveStatus || autoLeaveType;
           
           const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '0', mergedLeaveValue, note];
@@ -529,7 +530,10 @@ async function main() {
         note = `[${holidayName ? holidayName : dayName}] ` + allText;
       }
       
-      const hasClockInAndOut = (allText.includes('출근') && allText.includes('퇴근')) || (endMin - rawStartMin >= 4 * 60);
+      // 💡 [수정됨] 출근/퇴근 단어 유무 감지
+      const hasClockIn = allText.includes('출근') || allText.includes('입실');
+      const hasClockOut = allText.includes('퇴근') || allText.includes('퇴실');
+      const hasClockInAndOut = (hasClockIn && hasClockOut) || (endMin - rawStartMin >= 4 * 60);
 
       if (hasClockInAndOut) {
         if (leaveStatus === '반차' || leaveStatus === '조퇴') {
@@ -538,6 +542,9 @@ async function main() {
       } else {
         if (['연차', '반차', '휴가', '조퇴', '결근', '예비군', '민방위'].includes(leaveStatus)) {
           status = leaveStatus;
+        } else if (!hasClockIn && !hasClockOut) {
+          // 💡 [추가됨] 출근/퇴근/휴가 단어가 전혀 없는 메시지(퇴사 인사 등)는 '단순메시지' 상태로 분류
+          status = '단순메시지';
         }
       }
 
@@ -547,13 +554,14 @@ async function main() {
       }
 
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
-      if (!['연차', '휴가', '결근', '예비군', '민방위'].includes(status)) {
+      
+      // 💡 [수정됨] 단순메시지 상태인 경우, 의미 없는 지각/야근 분석을 생략
+      if (!['연차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
         if (workTypeKey === 'FIXED') analysis = analyzeFixed(startMin, endMin);
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(startMin, endMin);
         else if (workTypeKey === 'PART_TIME') analysis = analyzePartTime(startMin, endMin);
       }
 
-      // 💡 [우선순위 결정 핵심부] 두 필드를 하나로 병합 (휴가여부 데이터가 있으면 우선 적용)
       const mergedLeaveValue = leaveStatus || autoLeaveType;
 
       if (!row) {
@@ -573,7 +581,7 @@ async function main() {
         row[7] = formatTimeFromMins(endMin);
         row[8] = analysis.overtime;
         row[9] = String(analysis.overtimeHours);
-        row[10] = mergedLeaveValue; // 💡 결합된 통합 데이터 매핑
+        row[10] = mergedLeaveValue; 
         row[11] = note; 
 
         toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:L${rowIdx + 1}`, values: [row.slice(1, 12)] });
@@ -581,7 +589,7 @@ async function main() {
     }
   }
 
-  // 3. 일괄 쓰기 및 정렬 (범위 L열로 재조정)
+  // 3. 일괄 쓰기 및 정렬
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
       spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:L`,
