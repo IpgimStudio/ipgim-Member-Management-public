@@ -28,7 +28,7 @@ if (!CONFIG.sheets.sheetNames) {
   };
 }
 
-// ─────────────────── 상수 (휴일 & 요일) ───────────────────
+// ─────────────────── 상수 (휴일, 요일 및 이모지 풀) ───────────────────
 const HOLIDAYS = {
   // --- 2025년 ---
   "2025-01-01": "신정", 
@@ -78,7 +78,21 @@ const HOLIDAYS = {
 
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
+// 💡 [추가됨] 랜덤 이모지 풀 (Pool)
+const EMOJI_POOLS = {
+  clockIn: ['muscle', 'fire', 'sparkles', 'star2', 'coffee', 'sun_with_face', 'rocket', 'v', 'blush', 'grinning'],
+  clockOut: ['wave', 'clap', '100', 'beers', 'moon', 'zzz', 'tada', 'thumbsup', 'star-struck', 'heart_eyes', 'relaxed'],
+  birthday: ['partying_face', 'birthday', 'cake', 'confetti_ball', 'gift', 'balloon', 'tada', 'clinking_glasses', 'crown', 'sparkler'],
+  unknown: ['question']
+};
+
 // ─────────────────── 유틸리티 및 분석 엔진 ───────────────────
+// 💡 [추가됨] 이모지 풀에서 원하는 개수만큼 섞어서 뽑아오는 함수
+function getRandomEmojis(pool, count) {
+  const shuffled = [...pool].sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, count);
+}
+
 function formatTimeFromMins(totalMinutes) {
   if (totalMinutes === undefined || totalMinutes === null) return '-';
   const h = Math.floor(totalMinutes / 60);
@@ -123,7 +137,6 @@ function normalizeSheetTime(val) {
   return strVal;
 }
 
-// 💡 입사 연차/월차 자동 판단 엔진 (만 1년 기준)
 function getLeaveTypeByTenure(joinDateStr, currentDateStr) {
   if (!joinDateStr || !currentDateStr) return '-';
   try {
@@ -207,7 +220,7 @@ function analyzeFixed(startMin, endMin) {
 function analyzeFlexible(startMin, endMin) {
   const minStart = 8 * 60; 
   const maxStartLimit = 11 * 60; 
-  let effectiveStart = startMin < minStart ? minStart : startMin; // 구문 오류 수정 완료됨
+  let effectiveStart = startMin < minStart ? minStart : startMin; 
   let lateness = startMin > maxStartLimit ? '지각' : '정상';
   const targetEnd = effectiveStart + (9 * 60);
   let overtime = '없음';
@@ -258,6 +271,19 @@ class SlackClient {
     const data = await res.json();
     if (!data.ok) throw new Error(`Slack API 오류: ${data.error}`);
     return data;
+  }
+  async getBotUserId() {
+    const res = await this.call('auth.test');
+    return res.user_id;
+  }
+  async addReaction(channel, timestamp, emojiName) {
+    try {
+      await this.call('reactions.add', { channel, timestamp, name: emojiName });
+    } catch (err) {
+      if (!err.message.includes('already_reacted')) {
+        console.error(`  [이모지 실패] ${err.message}`);
+      }
+    }
   }
   async fetchMessagesInRange(channelId, oldest) {
     const allMessages = [];
@@ -315,8 +341,9 @@ class SheetsClient {
   }
   async getEmployeeMaster() {
     try {
+      // 💡 [수정됨] 생일 데이터를 가져오기 위해 탐색 범위를 A:G 로 확장
       const res = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:F`,
+        spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G`,
       });
       const rows = res.data.values || [];
       const employees = {};
@@ -324,7 +351,10 @@ class SheetsClient {
         const name = rows[i][0];
         if (name) {
           employees[name] = {
-            status: rows[i][1] || '재직', joinDate: rows[i][2] || '2000-01-01', workType: rows[i][5] || '고정' 
+            status: rows[i][1] || '재직', 
+            joinDate: rows[i][2] || '2000-01-01', 
+            workType: rows[i][5] || '고정',
+            birthday: rows[i][6] ? rows[i][6].trim() : '' // 💡 생일(MM-DD) 컬럼 매핑
           };
         }
       }
@@ -333,9 +363,10 @@ class SheetsClient {
   }
   async addEmployee(name, joinDate) {
     await this.sheets.spreadsheets.values.append({
-      spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:F`,
+      // 💡 [수정됨] 범위를 A:G 로 확장
+      spreadsheetId: this.sheetId, range: `'${CONFIG.sheets.sheetNames.employee}'!A:G`,
       valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: [[name, '재직', joinDate, '', '자동등록', '고정']] },
+      requestBody: { values: [[name, '재직', joinDate, '', '자동등록', '고정', '']] },
     });
   }
   async sortSheet(sheetName) {
@@ -361,7 +392,7 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v17.4 (퇴사자 메시지 수집 확장)');
+  console.log('  Slack 출퇴근 스마트 로거 v17.6 (스마트 생일/랜덤 이모지 탑재)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -370,7 +401,9 @@ async function main() {
   
   const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '휴가/연월차구분', '비고'];
   await sheets.ensureSheet(sheetName, HEADERS);
-  await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제']);
+  
+  // 💡 [수정됨] 사원마스터 헤더에 '생일(MM-DD)' 필드 추가
+  await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제', '생일(MM-DD)']);
   
   let existingRows = await sheets.readAll(sheetName);
   
@@ -381,12 +414,15 @@ async function main() {
   }
 
   const slack = new SlackClient(CONFIG.slack.token);
+  const botUserId = await slack.getBotUserId();
   const userMap = await slack.getUsers();
   const masterMap = await sheets.getEmployeeMaster();
   
+  const isInitialRun = existingRows.length < 5;
   let oldest;
-  if (existingRows.length < 5) { 
-    console.log(`\n[안내] 시트 데이터가 없으므로 Slack '전체 기간' 메시지를 수집합니다! (최초 1회 한정)`);
+  if (isInitialRun) { 
+    console.log(`\n[안내] 시트 데이터가 없으므로 Slack '전체 기간' 메시지를 수집합니다!`);
+    console.log(`[안내] API 보호를 위해 이번 최초 실행에서는 이모지 작업을 생략합니다.`);
     oldest = '0'; 
   } else {
     console.log(`\n[안내] 시트에 데이터가 존재하여 '최근 30일치' 데이터를 동기화합니다.`);
@@ -428,7 +464,7 @@ async function main() {
       const joinDate = firstActiveDate[userName] || dateStr;
       console.log(`  [신규 등록] ${userName} 사원마스터에 추가 중...`);
       await sheets.addEmployee(userName, joinDate);
-      masterMap[userName] = { status: '재직', joinDate: joinDate, workType: '고정' };
+      masterMap[userName] = { status: '재직', joinDate: joinDate, workType: '고정', birthday: '' };
     }
 
     if (!groupedMsgs[dateStr]) groupedMsgs[dateStr] = {};
@@ -451,11 +487,9 @@ async function main() {
 
   const toAppend = [];
   const toUpdate = [];
+  const reactionQueue = []; 
   
-  // 💡 [수정됨] CEO만 제외하고, 퇴사자를 포함한 모든 사람을 탐색 대상으로 삼습니다.
-  const targetMembers = Object.keys(masterMap).filter(n => 
-    !masterMap[n].workType.includes('CEO')
-  );
+  const targetMembers = Object.keys(masterMap).filter(n => !masterMap[n].workType.includes('CEO'));
 
   const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const currentHour = nowKst.getUTCHours();
@@ -488,11 +522,7 @@ async function main() {
       if (msgs.length === 0) {
         if (!row) {
           if (date === todayStr && currentHour < 23) continue; 
-          
-          // 💡 [추가됨] 퇴사자이거나 재직 상태가 아닌 사람은, 메시지가 없는 날 결근으로 강제 기록하지 않고 스킵합니다.
-          if (masterMap[member].status !== '재직' && masterMap[member].status !== 'active') {
-            continue;
-          }
+          if (masterMap[member].status !== '재직' && masterMap[member].status !== 'active') continue;
           
           let status = '결근';
           let note = '평일 (미보고)';
@@ -500,9 +530,7 @@ async function main() {
           else if (isWeekend) { status = '휴무'; note = `주말(${dayName})`; }
           
           let autoLeaveType = '-';
-          if (status === '결근') {
-            autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
-          }
+          if (status === '결근') autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
           
           const mergedLeaveValue = leaveStatus || autoLeaveType;
           
@@ -530,32 +558,63 @@ async function main() {
         note = `[${holidayName ? holidayName : dayName}] ` + allText;
       }
       
-      // 💡 [수정됨] 출근/퇴근 단어 유무 감지
       const hasClockIn = allText.includes('출근') || allText.includes('입실');
       const hasClockOut = allText.includes('퇴근') || allText.includes('퇴실');
       const hasClockInAndOut = (hasClockIn && hasClockOut) || (endMin - rawStartMin >= 4 * 60);
 
       if (hasClockInAndOut) {
-        if (leaveStatus === '반차' || leaveStatus === '조퇴') {
-          status = leaveStatus;
-        }
+        if (leaveStatus === '반차' || leaveStatus === '조퇴') status = leaveStatus;
       } else {
         if (['연차', '반차', '휴가', '조퇴', '결근', '예비군', '민방위'].includes(leaveStatus)) {
           status = leaveStatus;
         } else if (!hasClockIn && !hasClockOut) {
-          // 💡 [추가됨] 출근/퇴근/휴가 단어가 전혀 없는 메시지(퇴사 인사 등)는 '단순메시지' 상태로 분류
           status = '단순메시지';
         }
       }
 
-      let autoLeaveType = '-';
-      if (['연차', '반차', '휴가'].includes(status)) {
-        autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
+      // 💡 [수정됨] 스마트 이모지 & 생일 축하 로직
+      if (!isInitialRun && msgs.length > 0) {
+        // 사원마스터에 생일이 입력되어 있고, 오늘 날짜(MM-DD)와 일치하는지 확인
+        const isBirthday = masterMap[member].birthday && date.substring(5) === masterMap[member].birthday;
+
+        for (const m of msgs) {
+          const alreadyReacted = m.reactions && m.reactions.some(r => r.users.includes(botUserId));
+          
+          if (!alreadyReacted) {
+            const mText = m.text || '';
+            const isMsgClockIn = mText.includes('출근') || mText.includes('입실');
+            const isMsgClockOut = mText.includes('퇴근') || mText.includes('퇴실');
+            
+            let emojisToAdd = [];
+            
+            // 1. 생일이면서 출근이나 퇴근 보고를 올린 경우 (생일 이모지 랜덤 5개)
+            if (isBirthday && (isMsgClockIn || isMsgClockOut)) {
+              emojisToAdd = getRandomEmojis(EMOJI_POOLS.birthday, 5);
+            } 
+            // 2. 퇴근 보고를 올린 경우 (수고 이모지 랜덤 1개)
+            else if (isMsgClockOut) { 
+              emojisToAdd = getRandomEmojis(EMOJI_POOLS.clockOut, 1);
+            } 
+            // 3. 출근 보고를 올린 경우 (파이팅 이모지 랜덤 1개)
+            else if (isMsgClockIn) {
+              emojisToAdd = getRandomEmojis(EMOJI_POOLS.clockIn, 1);
+            } 
+            // 4. 출근/퇴근 단어가 전혀 없는 경우 (물음표 1개)
+            else {
+              emojisToAdd = getRandomEmojis(EMOJI_POOLS.unknown, 1);
+            }
+            
+            for (const emoji of emojisToAdd) {
+              reactionQueue.push({ ts: m.ts, emoji: emoji });
+            }
+          }
+        }
       }
 
+      let autoLeaveType = '-';
+      if (['연차', '반차', '휴가'].includes(status)) autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
+
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
-      
-      // 💡 [수정됨] 단순메시지 상태인 경우, 의미 없는 지각/야근 분석을 생략
       if (!['연차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
         if (workTypeKey === 'FIXED') analysis = analyzeFixed(startMin, endMin);
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(startMin, endMin);
@@ -589,7 +648,6 @@ async function main() {
     }
   }
 
-  // 3. 일괄 쓰기 및 정렬
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
       spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:L`,
@@ -604,6 +662,14 @@ async function main() {
   }
 
   await sheets.sortSheet(sheetName);
+
+  if (reactionQueue.length > 0) {
+    console.log(`\n  [이모지 작업] 총 ${reactionQueue.length}개의 리액션을 슬랙에 추가합니다... (API 제한 방어 적용)`);
+    for (const req of reactionQueue) {
+      await slack.addReaction(CONFIG.slack.channelId, req.ts, req.emoji);
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+  }
 
   console.log(`\n========================================`);
   console.log(`  ✅ 출퇴근 기록 엔진 완벽 동기화 완료!`);
