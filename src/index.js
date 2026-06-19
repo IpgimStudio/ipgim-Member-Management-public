@@ -43,6 +43,13 @@ function getDateFromTs(ts) {
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
 }
 
+// [신규] 이름에서 괄호와 그 안의 내용(상태 메시지 등)을 깔끔하게 지워주는 함수
+function cleanUserName(rawName) {
+  if (!rawName) return '알 수 없음';
+  // (), [], {}, <> 안에 있는 모든 텍스트와 주변 공백 제거
+  return rawName.replace(/\s*[\(\[\{<].*?[\)\]\}>]\s*/g, '').trim();
+}
+
 // ─────────────────── Slack 클라이언트 ───────────────────
 class SlackClient {
   constructor(token) { this.token = token; }
@@ -144,7 +151,8 @@ class SheetsClient {
         const name = rows[i][0];
         if (name) {
           employees[name] = {
-            status: rows[i][1] || 'active',
+            // 호환성을 위해 'active'도 동일하게 취급, 기본값은 '재직'
+            status: rows[i][1] || '재직',
             joinDate: rows[i][2] || '2000-01-01',
             workType: rows[i][5] || '고정' 
           };
@@ -163,7 +171,8 @@ class SheetsClient {
       range: `'${CONFIG.sheets.sheetNames.employee}'!A:F`,
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: [[name, 'active', joinDate, '', '자동등록', '고정']] },
+      // 기본 상태를 '재직'으로 한국어화
+      requestBody: { values: [[name, '재직', joinDate, '', '자동등록', '고정']] },
     });
   }
 }
@@ -187,9 +196,10 @@ function parseAttendanceMessage(msg, today, userMap, masterMap) {
   else if (text.includes('조퇴')) status = '조퇴';
   else if (text.includes('퇴사')) status = '퇴사';
 
-  const userName = userMap[msg.user] || msg.user || '알 수 없음';
+  // [중요] 이름에 괄호로 붙어있는 연월차 정보 제거 (예: 양나영(6/25오후반차) -> 양나영)
+  const rawName = userMap[msg.user] || msg.user || '알 수 없음';
+  const userName = cleanUserName(rawName);
   
-  // 사원마스터에서 지정된 근무제 우선 적용, 단 메시지에 명시된 경우 덮어쓰기
   let workType = masterMap[userName]?.workType || '고정';
   if (text.includes('유연')) workType = '유연';
   if (text.includes('재택')) workType = '재택';
@@ -212,7 +222,7 @@ function parseAttendanceMessage(msg, today, userMap, masterMap) {
     slackTs: msg.ts,
     timestamp: parseFloat(msg.ts),
     date: today,
-    name: userName,
+    name: userName, // 정제된 이름 사용
     type: type,
     workType: workType,
     status: status,
@@ -225,7 +235,7 @@ function parseAttendanceMessage(msg, today, userMap, masterMap) {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 마스터 로거 v8.0 실행');
+  console.log('  Slack 출퇴근 스마트 로거 v9.0 실행');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -242,28 +252,25 @@ async function main() {
   const slack = new SlackClient(CONFIG.slack.token);
   const userMap = await slack.getUsers();
   
-  // 사원마스터 데이터 로드
   const masterMap = await sheets.getEmployeeMaster();
   const toAppend = [];
   const toUpdate = [];
 
-  // 0. [핵심] 사원마스터 변경 사항을 과거 출퇴근 기록에 자동 동기화 (Retroactive Sync)
+  // 과거 기록 자동 동기화
   let syncCount = 0;
   for (let i = 1; i < existingRows.length; i++) {
     const row = existingRows[i];
-    while (row.length < 11) row.push(''); // 배열 길이 맞추기
+    while (row.length < 11) row.push('');
 
     const name = row[1];
     const currentWorkType = row[4] || '고정';
     const currentStatus = row[5] || '정상';
     const masterWorkType = masterMap[name]?.workType;
 
-    // 만약 시트에 '고정'으로 되어 있는데 사원마스터가 다르면 업데이트
     if (masterWorkType && currentWorkType === '고정' && masterWorkType !== '고정') {
-      row[4] = masterWorkType; // 메모리 업데이트
+      row[4] = masterWorkType; 
       toUpdate.push({ range: `'${sheetName}'!E${i + 1}`, values: [[masterWorkType]] });
       
-      // 아르바이트로 변경 시, 짧은 근무로 찍힌 '확인(반차/조퇴)' 억울한 마크 해제
       if (masterWorkType === '아르바이트' && currentStatus === '확인(반차/조퇴)') {
         row[5] = '정상';
         toUpdate.push({ range: `'${sheetName}'!F${i + 1}`, values: [['정상']] });
@@ -272,7 +279,7 @@ async function main() {
     }
   }
   if (syncCount > 0) {
-    console.log(`\n[마스터 동기화] 과거 기록 ${syncCount}건의 근무제/상태를 사원마스터 기준으로 자동 수정합니다!`);
+    console.log(`\n[마스터 동기화] 과거 기록 ${syncCount}건의 근무제/상태를 자동 수정했습니다.`);
   }
 
   const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
@@ -282,7 +289,6 @@ async function main() {
 
   let parsedCount = 0;
 
-  // 1. 메시지 파싱 및 출퇴근 기록 처리
   for (const msg of messages) {
     if (msg.subtype && msg.subtype !== 'message_changed') continue; 
     
@@ -291,12 +297,12 @@ async function main() {
     
     if (!parsed) continue;
 
-    // 미등록 사원 자동 등록
     if (!masterMap[parsed.name]) {
       console.log(`  [신규 등록] ${parsed.name} 사원마스터에 추가 중...`);
       await sheets.addEmployee(parsed.name, dateStr);
-      masterMap[parsed.name] = { status: 'active', joinDate: dateStr, workType: '고정' };
-      parsed.workType = '고정'; // 첫 등록 시 기본값
+      // 신규 추가 시 상태는 '재직'으로 메모리에도 반영
+      masterMap[parsed.name] = { status: '재직', joinDate: dateStr, workType: '고정' };
+      parsed.workType = '고정'; 
     }
 
     parsedCount++;
@@ -326,13 +332,11 @@ async function main() {
         const row = existingRows[targetRowIdx];
         row[3] = timeStr; 
         
-        // 근무 시간 계산 로직
         if (row[9]) {
           const checkinTs = parseFloat(row[9]);
           const checkoutTs = parsed.timestamp;
           const durationHours = (checkoutTs - checkinTs) / 3600;
           
-          // 아르바이트가 아니면서 6시간 미만 근무 시 반차/조퇴 의심 표기
           if (parsed.workType !== '아르바이트' && durationHours > 0 && durationHours < 6 && parsed.status === '정상') {
             row[5] = '확인(반차/조퇴)';
           } else if (parsed.status !== '정상') {
@@ -343,7 +347,7 @@ async function main() {
         }
         
         row[9] = parsed.slackTs;
-        if (parsed.workType !== '고정') row[4] = parsed.workType; // 재택 등 변경 시
+        if (parsed.workType !== '고정') row[4] = parsed.workType;
         if (parsed.overtime === 'O') {
           row[6] = 'O'; row[7] = parsed.overtimeMins;
         }
@@ -367,13 +371,12 @@ async function main() {
     }
   }
 
-  // 2. 과거 모든 날짜의 미보고자(결근/연차) 일괄 검사
   console.log(`\n--- 날짜 전체(주말 포함) 미보고자 마감 검사 실행 ---`);
   
   const todayStr = getDateFromTs(Date.now() / 1000);
-  const activeMembers = Object.keys(masterMap).filter(n => masterMap[n].status === 'active');
+  // '재직'이거나 레거시 'active'인 사람 모두 포함
+  const activeMembers = Object.keys(masterMap).filter(n => masterMap[n].status === '재직' || masterMap[n].status === 'active');
   
-  // 수집한 메시지에서 가장 오래된 날짜 추출 (없으면 오늘)
   let dateSet = new Set(messages.map(m => getDateFromTs(m.ts)));
   if (dateSet.size === 0) dateSet.add(todayStr);
   
