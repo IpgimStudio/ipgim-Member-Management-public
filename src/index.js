@@ -23,7 +23,7 @@ if (process.env.GOOGLE_PRIVATE_KEY) CONFIG.sheets.privateKey = process.env.GOOGL
 
 if (!CONFIG.sheets.sheetNames) {
   CONFIG.sheets.sheetNames = { 
-    attendance: '출퇴근기록_v3', // 로컬 스크립트와 동일한 구조를 위해 V3로 생성
+    attendance: '출퇴근기록_v3',
     employee: '사원마스터'
   };
 }
@@ -42,7 +42,7 @@ const HOLIDAYS = {
 };
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
-// ─────────────────── 유틸리티 및 분석 엔진 ───────────────────
+// ─────────────────── 유틸리티 ───────────────────
 function formatTimeFromMins(totalMinutes) {
   if (totalMinutes === undefined || totalMinutes === null) return '-';
   const h = Math.floor(totalMinutes / 60);
@@ -80,11 +80,10 @@ function cleanUserName(rawName) {
   return rawName.replace(/\s*[\(\[\{<].*?[\)\]\}>]\s*/g, '').trim();
 }
 
-// 사용자 텍스트에서 시간 추출 (로컬 스크립트 이식)
 function extractTimeFromText(text, ts) {
   const times = [];
   const kstObj = getKstObj(ts);
-  times.push(kstObj.getUTCHours() * 60 + kstObj.getUTCMinutes()); // 기본 메시지 시간
+  times.push(kstObj.getUTCHours() * 60 + kstObj.getUTCMinutes()); 
 
   if (text.includes('출근') || text.includes('입실')) {
     const timeRegex = /(\d{1,2})\s*[:시]\s*(\d{1,2})?/;
@@ -100,7 +99,6 @@ function extractTimeFromText(text, ts) {
   return times;
 }
 
-// 휴가/연차/반차 추출 엔진 (새로운 열)
 function extractLeaveStatus(text) {
   if (text.includes('연차')) return '연차';
   if (text.includes('반차')) return '반차';
@@ -110,7 +108,6 @@ function extractLeaveStatus(text) {
   return '';
 }
 
-// ─────────────────── 지각 / 야근 분석 엔진 (로컬 스크립트 완벽 이식) ───────────────────
 function analyzeFixed(startMin, endMin) {
   const workStart = 9 * 60; 
   const workEnd = 18 * 60; 
@@ -242,7 +239,7 @@ class SheetsClient {
     if (!rows || rows.length < 2) return null;
     let latest = 0;
     for (let i = 1; i < rows.length; i++) {
-      const tsStr = String(rows[i][12] || ''); // M열(12) slack_ts
+      const tsStr = String(rows[i][12] || ''); 
       if (!tsStr || tsStr.startsWith('auto')) continue;
       const ts = parseFloat(tsStr);
       if (!isNaN(ts) && ts > latest) latest = ts;
@@ -297,14 +294,13 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 마스터 로거 v14.0 (로컬 엔진 통합본)');
+  console.log('  Slack 출퇴근 스마트 로거 v15.0 (최초 활동일 감지)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
   const sheetName = CONFIG.sheets.sheetNames.attendance;
   const masterSheetName = CONFIG.sheets.sheetNames.employee;
   
-  // 14개 열로 완벽 동기화 (휴가여부 추가)
   const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '휴가여부', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '비고', 'slack_ts', '출처'];
   await sheets.ensureSheet(sheetName, HEADERS);
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제']);
@@ -320,6 +316,35 @@ async function main() {
   const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   
+  // 💡 [신규] 0. 사원별 '최초 활동일(입사일)' 정밀 감지
+  const firstActiveDate = {};
+  
+  // (1) 기존 시트에서 진짜 활동 기록 추출 (auto 생성 기록 무시)
+  for (let i = 1; i < existingRows.length; i++) {
+    const date = existingRows[i][0];
+    const name = existingRows[i][2]; 
+    const tsStr = existingRows[i][12]; // slack_ts
+    
+    // 코드가 임의로 만든 결근 기록은 입사일 계산에서 제외
+    if (!tsStr || String(tsStr).startsWith('auto')) continue;
+    
+    if (date && name) {
+      if (!firstActiveDate[name] || date < firstActiveDate[name]) firstActiveDate[name] = date;
+    }
+  }
+  
+  // (2) 새로 불러온 슬랙 메시지에서 활동 기록 추출
+  for (const msg of messages) {
+    if (msg.subtype && msg.subtype !== 'message_changed') continue;
+    const date = getDateFromTs(msg.ts);
+    const rawName = userMap[msg.user] || msg.user;
+    const name = cleanUserName(rawName);
+    
+    if (name && (!firstActiveDate[name] || date < firstActiveDate[name])) {
+      firstActiveDate[name] = date;
+    }
+  }
+
   // 1. 메시지 그룹화 (날짜 -> 이름 -> [메시지 배열])
   const groupedMsgs = {};
   for (const msg of messages) {
@@ -330,9 +355,12 @@ async function main() {
     const dateStr = getDateFromTs(msg.ts);
     const userName = cleanUserName(userMap[msg.user] || msg.user);
 
+    // 미등록 사원은 '최초 활동일'을 입사일로 등록!
     if (!masterMap[userName]) {
-      await sheets.addEmployee(userName, dateStr);
-      masterMap[userName] = { status: '재직', joinDate: dateStr, workType: '고정' };
+      const joinDate = firstActiveDate[userName] || dateStr;
+      console.log(`  [신규 등록] ${userName} (입사일: ${joinDate}) 사원마스터에 추가 중...`);
+      await sheets.addEmployee(userName, joinDate);
+      masterMap[userName] = { status: '재직', joinDate: joinDate, workType: '고정' };
     }
 
     if (!groupedMsgs[dateStr]) groupedMsgs[dateStr] = {};
@@ -373,27 +401,27 @@ async function main() {
     const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
 
     for (const member of activeMembers) {
-      if (date < masterMap[member].joinDate) continue;
+      // 💡 [핵심] 사원마스터의 입사일뿐만 아니라, 시스템이 직접 감지한 '최초 활동일' 이전의 결근 데이터는 아예 생성 금지!
+      const userJoinDate = firstActiveDate[member] || masterMap[member].joinDate;
+      if (date < userJoinDate) continue;
 
       const msgs = groupedMsgs[date]?.[member] || [];
-      const rowIdx = existingRows.findIndex(r => r[0] === date && r[2] === member); // 이름은 C열(인덱스2)
+      const rowIdx = existingRows.findIndex(r => r[0] === date && r[2] === member); 
       const row = rowIdx >= 0 ? existingRows[rowIdx] : null;
 
-      // 워크타입 변환 (고정->FIXED 등)
       let rawWorkType = masterMap[member].workType;
       let workTypeKey = 'UNKNOWN';
       if (rawWorkType.includes('고정')) workTypeKey = 'FIXED';
       else if (rawWorkType.includes('유연')) workTypeKey = 'FLEXIBLE';
       else if (rawWorkType.includes('아르바이트')) workTypeKey = 'PART_TIME';
 
-      // 텍스트 통합 분석
       const allText = msgs.map(m => m.text.replace(/\n/g, ' ')).join(' | ');
       let leaveStatus = extractLeaveStatus(allText);
 
-      // (1) 결근 및 미보고 처리
+      // 결근 및 미보고 처리
       if (msgs.length === 0) {
         if (!row) {
-          if (date === todayStr && currentHour < 23) continue; // 오늘은 밤 11시까지 대기
+          if (date === todayStr && currentHour < 23) continue; 
           
           let status = '결근';
           let note = '평일 (미보고)';
@@ -401,7 +429,6 @@ async function main() {
           else if (isWeekend) { status = '휴무'; note = `주말(${dayName})`; }
           
           const fakeTs = `auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-          // [날짜, 요일, 이름, 근무제, 상태, 휴가여부, 지각, 출근, 퇴근, 야근, 야근시간, 비고, ts, 출처]
           const newRow = [date, dayName, member, rawWorkType, status, leaveStatus, '-', '-', '-', '-', '0', note, fakeTs, 'slack-logger'];
           toAppend.push(newRow);
           existingRows.push(newRow); 
@@ -409,7 +436,7 @@ async function main() {
         continue;
       }
 
-      // (2) 출근 기록이 있는 경우 (시간 파싱)
+      // 출근 기록이 있는 경우
       let times = [];
       for (const m of msgs) times.push(...extractTimeFromText(m.text, m.ts));
       times.sort((a, b) => a - b);
@@ -417,16 +444,14 @@ async function main() {
       const startMin = times[0];
       const endMin = times[times.length - 1];
 
-      // 상태 판정
       let status = '출근';
       let note = allText;
       if (holidayName || isWeekend) {
         status = '휴일근무';
         note = `[${holidayName ? holidayName : dayName}] ` + allText;
       }
-      if (leaveStatus === '연차' || leaveStatus === '반차') status = leaveStatus; // 연차 명시 시 덮어쓰기
+      if (leaveStatus === '연차' || leaveStatus === '반차') status = leaveStatus; 
 
-      // 지각/야근 엔진
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
       if (workTypeKey === 'FIXED') analysis = analyzeFixed(startMin, endMin);
       else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(startMin, endMin);
@@ -446,13 +471,13 @@ async function main() {
         row[1] = dayName;
         row[3] = rawWorkType;
         row[4] = status;
-        row[5] = leaveStatus; // 휴가여부
+        row[5] = leaveStatus; 
         row[6] = analysis.lateness;
         row[7] = formatTimeFromMins(startMin);
         row[8] = formatTimeFromMins(endMin);
         row[9] = analysis.overtime;
         row[10] = String(analysis.overtimeHours);
-        row[11] = note; // 비고
+        row[11] = note; 
         row[12] = lastTs;
 
         toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:M${rowIdx + 1}`, values: [row.slice(1, 13)] });
@@ -460,7 +485,6 @@ async function main() {
     }
   }
 
-  // 3. 일괄 쓰기 및 정렬
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
       spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:N`,
