@@ -21,7 +21,6 @@ if (process.env.SHEET_ID) CONFIG.sheets.sheetId = process.env.SHEET_ID;
 if (process.env.GOOGLE_SERVICE_EMAIL) CONFIG.sheets.serviceEmail = process.env.GOOGLE_SERVICE_EMAIL;
 if (process.env.GOOGLE_PRIVATE_KEY) CONFIG.sheets.privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
-// 시트 이름 설정 (로컬 시스템과 동기화)
 if (!CONFIG.sheets.sheetNames) {
   CONFIG.sheets.sheetNames = { 
     attendance: '출퇴근기록',
@@ -75,7 +74,6 @@ class SlackClient {
       allMessages.push(...result.messages);
       cursor = result.response_metadata?.next_cursor;
     } while (cursor);
-    
     return allMessages.sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
   }
 
@@ -134,30 +132,46 @@ class SheetsClient {
     return latest === 0 ? null : String(latest);
   }
 
-  // [신규] 사원마스터에서 active 상태인 직원 목록 가져오기
-  async getActiveMembers() {
+  // 사원마스터 전체 데이터 로드
+  async getEmployeeMaster() {
     try {
       const res = await this.sheets.spreadsheets.values.get({
         spreadsheetId: this.sheetId,
-        range: `'${CONFIG.sheets.sheetNames.employee}'!A:B`,
+        range: `'${CONFIG.sheets.sheetNames.employee}'!A:F`,
       });
       const rows = res.data.values || [];
-      const activeMembers = [];
+      const employees = {};
       for (let i = 1; i < rows.length; i++) {
-        if (rows[i][1] === 'active') {
-          activeMembers.push(rows[i][0]);
+        const name = rows[i][0];
+        if (name) {
+          employees[name] = {
+            status: rows[i][1] || 'active',
+            joinDate: rows[i][2] || '2000-01-01',
+            workType: rows[i][5] || '고정' // F열: 근무제 (고정, 유연, 아르바이트 등)
+          };
         }
       }
-      return activeMembers;
+      return employees;
     } catch (err) {
-      console.warn(`[Sheets] 사원마스터 시트를 읽을 수 없습니다. (${err.message})`);
-      return [];
+      console.warn(`[Sheets] 사원마스터 로드 실패: ${err.message}`);
+      return {};
     }
+  }
+
+  // 신규 사원 자동 등록 (F열 기본값 '고정')
+  async addEmployee(name, joinDate) {
+    await this.sheets.spreadsheets.values.append({
+      spreadsheetId: this.sheetId,
+      range: `'${CONFIG.sheets.sheetNames.employee}'!A:F`,
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: [[name, 'active', joinDate, '', '자동등록', '고정']] },
+    });
   }
 }
 
 // ─────────────────── 메시지 정밀 파싱 ───────────────────
-function parseAttendanceMessage(msg, today, userMap) {
+function parseAttendanceMessage(msg, today, userMap, masterMap) {
   const text = msg.text?.trim() || '';
   if (!text) return null;
 
@@ -175,7 +189,10 @@ function parseAttendanceMessage(msg, today, userMap) {
   else if (text.includes('조퇴')) status = '조퇴';
   else if (text.includes('퇴사')) status = '퇴사';
 
-  let workType = '고정';
+  const userName = userMap[msg.user] || msg.user || '알 수 없음';
+  
+  // 사원마스터에서 지정된 근무제 우선 적용, 단 메시지에 명시된 경우 덮어쓰기
+  let workType = masterMap[userName]?.workType || '고정';
   if (text.includes('유연')) workType = '유연';
   if (text.includes('재택')) workType = '재택';
 
@@ -191,7 +208,6 @@ function parseAttendanceMessage(msg, today, userMap) {
     if (totalMins > 0) overtimeMins = String(totalMins);
   }
 
-  const userName = userMap[msg.user] || msg.user || '알 수 없음';
   const cleanNote = text.replace(/\n/g, ' ');
 
   return {
@@ -211,14 +227,15 @@ function parseAttendanceMessage(msg, today, userMap) {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v6.0 실행');
+  console.log('  Slack 출퇴근 마스터 로거 v7.0 실행');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
   const sheetName = CONFIG.sheets.sheetNames.attendance;
-  const headerRow = ['날짜', '이름', '출근시간', '퇴근시간', '근무유형', '상태', '연장', '연장시간(분)', '비고', 'slack_ts', '출처'];
-
-  await sheets.ensureSheet(sheetName, headerRow);
+  const masterSheetName = CONFIG.sheets.sheetNames.employee;
+  
+  await sheets.ensureSheet(sheetName, ['날짜', '이름', '출근시간', '퇴근시간', '근무유형', '상태', '연장', '연장시간(분)', '비고', 'slack_ts', '출처']);
+  await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제']);
   
   let existingRows = await sheets.readAll(sheetName);
   const lastTs = sheets.getLatestSlackTs(existingRows);
@@ -226,8 +243,11 @@ async function main() {
 
   const slack = new SlackClient(CONFIG.slack.token);
   const userMap = await slack.getUsers();
-  const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
   
+  // 사원마스터 데이터 로드
+  const masterMap = await sheets.getEmployeeMaster();
+
+  const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
   console.log(`\n--- Slack 채널 메시지 수집 중... ---`);
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   console.log(`[Slack] 처리할 새 메시지: ${messages.length}건\n`);
@@ -236,19 +256,28 @@ async function main() {
   const toUpdate = [];
   let parsedCount = 0;
 
+  // 1. 메시지 파싱 및 출퇴근 기록 처리
   for (const msg of messages) {
     if (msg.subtype && msg.subtype !== 'message_changed') continue; 
     
     const dateStr = getDateFromTs(msg.ts);
-    const parsed = parseAttendanceMessage(msg, dateStr, userMap);
+    const parsed = parseAttendanceMessage(msg, dateStr, userMap, masterMap);
     
     if (!parsed) continue;
-    parsedCount++;
 
+    // 미등록 사원 자동 등록
+    if (!masterMap[parsed.name]) {
+      console.log(`  [신규 등록] ${parsed.name} 사원마스터에 추가 중...`);
+      await sheets.addEmployee(parsed.name, dateStr);
+      masterMap[parsed.name] = { status: 'active', joinDate: dateStr, workType: '고정' };
+      parsed.workType = '고정'; // 첫 등록 시 기본값
+    }
+
+    parsedCount++;
     const timeStr = formatTimeDisplay(parsed.timestamp);
     const typeMark = parsed.type === 'check-in' ? '▶ 출근' : '◀ 퇴근';
     
-    console.log(`  [${parsed.date} ${timeStr}] ${parsed.name.padEnd(5)} ${typeMark} | 상태:${parsed.status}`);
+    console.log(`  [${parsed.date} ${timeStr}] ${parsed.name.padEnd(5)} ${typeMark} | 상태:${parsed.status} | 유형:${parsed.workType}`);
 
     if (parsed.type === 'check-in') {
       const newRow = [
@@ -271,13 +300,14 @@ async function main() {
         const row = existingRows[targetRowIdx];
         row[3] = timeStr; 
         
-        // [신규 로직] 근무 시간 계산하여 짧은 근무자 '확인(반차/조퇴)' 플래그
+        // 근무 시간 계산 로직
         if (row[9]) {
           const checkinTs = parseFloat(row[9]);
           const checkoutTs = parsed.timestamp;
           const durationHours = (checkoutTs - checkinTs) / 3600;
           
-          if (durationHours > 0 && durationHours < 6 && parsed.status === '정상') {
+          // 아르바이트가 아니면서 6시간 미만 근무 시 반차/조퇴 의심 표기
+          if (parsed.workType !== '아르바이트' && durationHours > 0 && durationHours < 6 && parsed.status === '정상') {
             row[5] = '확인(반차/조퇴)';
           } else if (parsed.status !== '정상') {
             row[5] = parsed.status;
@@ -287,11 +317,10 @@ async function main() {
         }
         
         row[9] = parsed.slackTs;
-        if (parsed.workType !== '고정') row[4] = parsed.workType;
+        if (parsed.workType !== '고정') row[4] = parsed.workType; // 재택 등 변경 시
         if (parsed.overtime === 'O') {
           row[6] = 'O'; row[7] = parsed.overtimeMins;
         }
-
         const oldNote = row[8] || '';
         row[8] = oldNote ? `${oldNote} | ${parsed.note}` : parsed.note;
 
@@ -312,39 +341,58 @@ async function main() {
     }
   }
 
-  // [신규 로직] 밤 11시 이후 실행 시 미보고자 '확인(연차/결근)' 추가
-  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const currentHour = nowKst.getUTCHours();
-  const currentDay = nowKst.getUTCDay(); // 0:일, 6:토
-  const todayStr = `${nowKst.getUTCFullYear()}-${String(nowKst.getUTCMonth() + 1).padStart(2, '0')}-${String(nowKst.getUTCDate()).padStart(2, '0')}`;
+  // 2. 과거 모든 날짜의 미보고자(결근/연차) 일괄 검사
+  console.log(`\n--- 날짜 전체(주말 포함) 미보고자 마감 검사 실행 ---`);
+  
+  const todayStr = getDateFromTs(Date.now() / 1000);
+  const activeMembers = Object.keys(masterMap).filter(n => masterMap[n].status === 'active');
+  
+  // 수집한 메시지에서 가장 오래된 날짜 추출 (없으면 오늘)
+  let dateSet = new Set(messages.map(m => getDateFromTs(m.ts)));
+  if (dateSet.size === 0) dateSet.add(todayStr);
+  
+  const sortedDates = Array.from(dateSet).sort();
+  const minDateObj = new Date(sortedDates[0]);
+  const todayObj = new Date(todayStr);
 
-  // 주말(토,일)이 아니고, 23시(밤 11시) 이후일 때만
-  if (currentHour >= 23 && currentDay !== 0 && currentDay !== 6) {
-    console.log(`\n--- 미보고자(연차/결근) 마감 검사 실행 ---`);
-    const activeMembers = await sheets.getActiveMembers();
-    
-    if (activeMembers.length > 0) {
-      const todayRecords = existingRows.filter(r => r[0] === todayStr);
-      const reportedNames = new Set(todayRecords.map(r => r[1]));
+  // minDate부터 오늘까지 하루도 빠짐없이 배열 생성
+  const allDays = [];
+  for (let d = new Date(minDateObj); d <= todayObj; d.setDate(d.getDate() + 1)) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    allDays.push(`${y}-${m}-${day}`);
+  }
 
-      for (const member of activeMembers) {
-        if (!reportedNames.has(member)) {
-          console.log(`  [누락 감지] ${member} -> 확인(연차/결근) 자동 등록`);
-          const ts = String(Math.floor(Date.now() / 1000));
-          const newRow = [
-            todayStr, member, '', '', '고정', '확인(연차/결근)', '', '', '미보고 (자동생성)', ts, 'slack-logger'
-          ];
-          toAppend.push(newRow);
-          existingRows.push([...newRow]);
-          reportedNames.add(member); // 중복 방지
-        }
+  let missingCount = 0;
+  for (const targetDate of allDays) {
+    const todayRecords = existingRows.filter(r => r[0] === targetDate);
+    const reportedNames = new Set(todayRecords.map(r => r[1]));
+
+    for (const member of activeMembers) {
+      // 입사일 이전 날짜는 검사하지 않음
+      if (targetDate < masterMap[member].joinDate) continue;
+
+      if (!reportedNames.has(member)) {
+        // 빈 slack_ts('')를 넣어 다음 수집 시 TS 최신화에 영향을 주지 않도록 함
+        const newRow = [
+          targetDate, member, '', '', masterMap[member].workType, '확인(연차/결근)', '', '', '미보고 (자동생성)', '', 'slack-logger'
+        ];
+        toAppend.push(newRow);
+        existingRows.push([...newRow]); // 당일 루프 중복 방지용
+        reportedNames.add(member);
+        missingCount++;
       }
-    } else {
-      console.log(`  ⚠️ 사원마스터에서 활성 멤버를 찾지 못해 검사를 생략합니다.`);
     }
   }
 
-  // 일괄 반영
+  if (missingCount > 0) {
+    console.log(`  [결과] 총 ${missingCount}건의 미보고(주말/평일 포함) 누락 데이터를 추가했습니다.`);
+  } else {
+    console.log(`  [결과] 누락된 보고 내역이 없습니다.`);
+  }
+
+  // 3. 일괄 반영
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
       spreadsheetId: sheets.sheetId, 
@@ -363,7 +411,7 @@ async function main() {
   }
 
   console.log(`\n========================================`);
-  console.log(`  ✅ 수집 완료 (정상 처리: ${parsedCount}건)`);
+  console.log(`  ✅ 전체 처리 완료 (메시지: ${parsedCount}건 / 미보고 생성: ${missingCount}건)`);
   console.log(`========================================`);
 }
 
