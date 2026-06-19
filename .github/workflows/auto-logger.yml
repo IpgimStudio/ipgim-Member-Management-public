@@ -2,8 +2,8 @@ name: Slack Logger
 
 on:
   schedule:
-  - cron: '*/10 * * * *'
-  workflow_dispatch:  # 관리자 수동 즉시 실행 열림
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
 
 jobs:
   fetch-and-log:
