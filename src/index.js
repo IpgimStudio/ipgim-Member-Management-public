@@ -147,12 +147,13 @@ function extractTimeFromText(text, ts, isMidnightShift = false) {
 }
 
 function extractLeaveStatus(text) {
-  let cleanText = text.replace(/(내일|익일|모레|다음주|차주|다음 주|월요일|화요일|수요일|목요일|금요일)[^.!|\n]*(휴가|연차|반차|조퇴|결근|예비군|민방위)/g, '');
-  cleanText = cleanText.replace(/(휴가|연차|반차|조퇴|결근|예비군|민방위)[^.!|\n]*(예정|계획)/g, '');
+  let cleanText = text.replace(/(내일|익일|모레|다음주|차주|다음 주|월요일|화요일|수요일|목요일|금요일)[^.!|\n]*(휴가|연차|월차|반차|조퇴|결근|예비군|민방위)/g, '');
+  cleanText = cleanText.replace(/(휴가|연차|월차|반차|조퇴|결근|예비군|민방위)[^.!|\n]*(예정|계획)/g, '');
   cleanText = cleanText.replace(/(즐거|행복|좋은|잘|건강|풀|풀충전)[^.!|\n]*(명절|추석|연휴|휴가|주말)/g, '');
   cleanText = cleanText.replace(/(명절|추석|연휴|휴가|주말)[^.!|\n]*(보내|되|쉬|다녀|만나|뵙|충전)/g, '');
 
   if (cleanText.includes('연차')) return '연차';
+  if (cleanText.includes('월차')) return '월차'; 
   if (cleanText.includes('반차')) return '반차';
   if (cleanText.includes('휴가') || cleanText.includes('명절') || cleanText.includes('추석') || cleanText.includes('연휴')) return '휴가';
   if (cleanText.includes('조퇴')) return '조퇴';
@@ -520,7 +521,7 @@ async function main() {
       if (hasClockInAndOut) {
         if (leaveStatus === '반차' || leaveStatus === '조퇴') status = leaveStatus;
       } else {
-        if (['연차', '반차', '휴가', '조퇴', '결근', '예비군', '민방위'].includes(leaveStatus)) status = leaveStatus;
+        if (['연차', '월차', '반차', '휴가', '조퇴', '결근', '예비군', '민방위'].includes(leaveStatus)) status = leaveStatus;
         else if (!hasClockIn && !hasClockOut) status = '단순메시지';
       }
 
@@ -544,9 +545,9 @@ async function main() {
         }
       }
 
-      let autoLeaveType = ['연차', '반차', '휴가'].includes(status) ? getLeaveTypeByTenure(userJoinDate, date) : '-';
+      let autoLeaveType = ['연차', '월차', '반차', '휴가'].includes(status) ? getLeaveTypeByTenure(userJoinDate, date) : '-';
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
-      if (!['연차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
+      if (!['연차', '월차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
         if (workTypeKey === 'FIXED') analysis = analyzeFixed(startMin, endMin);
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(startMin, endMin);
         else analysis = analyzePartTime(startMin, endMin);
