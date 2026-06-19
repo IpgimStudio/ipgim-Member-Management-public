@@ -587,7 +587,7 @@ async function main() {
     }
   }
 
-  if (toAppend.length > 0) await sheets.sheets.spreadsheets.values.append({ spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:L`, valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend } });
+  if (toAppend.length > 0) await sheets.sheets.spreadsheets.values.append({ spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:M`, valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', requestBody: { values: toAppend } });
   if (toUpdate.length > 0) await sheets.sheets.spreadsheets.values.batchUpdate({ spreadsheetId: sheets.sheetId, requestBody: { valueInputOption: 'RAW', data: toUpdate } });
   await sheets.sortSheet(sheetName);
 
