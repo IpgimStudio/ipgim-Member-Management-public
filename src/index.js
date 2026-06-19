@@ -30,12 +30,10 @@ if (!CONFIG.sheets.sheetNames) {
 
 // ─────────────────── 상수 (휴일 & 요일) ───────────────────
 const HOLIDAYS = {
-  // 2025년 공휴일 + 지정일
   "2025-01-01": "신정", "2025-01-28": "설날", "2025-01-29": "설날", "2025-01-30": "설날",
   "2025-03-01": "삼일절", "2025-03-03": "대체공휴일", "2025-05-01": "근로자의 날", "2025-05-05": "어린이날", "2025-05-06": "대체공휴일(석가탄신일)",
   "2025-06-06": "현충일", "2025-07-17": "제헌절", "2025-08-15": "광복절", "2025-10-03": "개천절", "2025-10-05": "추석",
   "2025-10-06": "추석", "2025-10-07": "추석", "2025-10-08": "대체공휴일", "2025-10-09": "한글날", "2025-12-25": "성탄절",
-  // 2026년 공휴일 + 지정일
   "2026-01-01": "신정", "2026-02-16": "설날", "2026-02-17": "설날", "2026-02-18": "설날",
   "2026-03-01": "삼일절", "2026-03-02": "대체공휴일", "2026-05-01": "근로자의 날", "2026-05-05": "어린이날", "2026-05-24": "석가탄신일",
   "2026-05-25": "대체공휴일", "2026-06-06": "현충일", "2026-07-17": "제헌절", "2026-08-15": "광복절", "2026-08-17": "대체공휴일",
@@ -94,7 +92,6 @@ function cleanUserName(rawName) {
   return rawName.replace(/\s*[\(\[\{<].*?[\)\]\}>]\s*/g, '').trim();
 }
 
-// 💡 [핵심] 가장 가까운 1시간(정시) 단위로 스냅하는 함수
 function snapToNearestHour(minutes) {
   return Math.round(minutes / 60) * 60;
 }
@@ -302,7 +299,7 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v17.0 (1시간 정시 스냅 적용)');
+  console.log('  Slack 출퇴근 스마트 로거 v17.1 (초기 전체 수집 탑재)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -315,7 +312,6 @@ async function main() {
   
   let existingRows = await sheets.readAll(sheetName);
   
-  // 데이터 복원 및 정규화
   for (let i = 1; i < existingRows.length; i++) {
     existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);
     existingRows[i][7] = normalizeSheetTime(existingRows[i][7]);
@@ -326,7 +322,16 @@ async function main() {
   const userMap = await slack.getUsers();
   const masterMap = await sheets.getEmployeeMaster();
   
-  const oldest = String(Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60));
+  // 💡 [핵심 업데이트] 시트가 비어있으면(초기 세팅) 전체 수집, 아니면 최근 30일 수집
+  let oldest;
+  if (existingRows.length < 5) { // 헤더만 있거나 데이터가 거의 없는 초기 상태
+    console.log(`\n[안내] 시트 데이터가 없으므로 Slack '전체 기간' 메시지를 수집합니다! (최초 1회 한정)`);
+    oldest = '0'; // 채널 생성일(0)부터 전체 가져오기
+  } else {
+    console.log(`\n[안내] 시트에 데이터가 존재하여 '최근 30일치' 데이터를 동기화합니다.`);
+    oldest = String(Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60)); // 최근 30일
+  }
+
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   
   const firstActiveDate = {};
@@ -438,7 +443,6 @@ async function main() {
       const rawStartMin = times[0];
       const endMin = times[times.length - 1];
 
-      // 💡 [핵심] 출근 시간을 가장 가까운 정시(1시간 단위)로 반올림하여 스냅
       const startMin = snapToNearestHour(rawStartMin);
 
       let status = '출근';
