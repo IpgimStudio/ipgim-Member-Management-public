@@ -43,10 +43,8 @@ function getDateFromTs(ts) {
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
 }
 
-// [신규] 이름에서 괄호와 그 안의 내용(상태 메시지 등)을 깔끔하게 지워주는 함수
 function cleanUserName(rawName) {
   if (!rawName) return '알 수 없음';
-  // (), [], {}, <> 안에 있는 모든 텍스트와 주변 공백 제거
   return rawName.replace(/\s*[\(\[\{<].*?[\)\]\}>]\s*/g, '').trim();
 }
 
@@ -151,7 +149,6 @@ class SheetsClient {
         const name = rows[i][0];
         if (name) {
           employees[name] = {
-            // 호환성을 위해 'active'도 동일하게 취급, 기본값은 '재직'
             status: rows[i][1] || '재직',
             joinDate: rows[i][2] || '2000-01-01',
             workType: rows[i][5] || '고정' 
@@ -171,7 +168,6 @@ class SheetsClient {
       range: `'${CONFIG.sheets.sheetNames.employee}'!A:F`,
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
-      // 기본 상태를 '재직'으로 한국어화
       requestBody: { values: [[name, '재직', joinDate, '', '자동등록', '고정']] },
     });
   }
@@ -196,7 +192,6 @@ function parseAttendanceMessage(msg, today, userMap, masterMap) {
   else if (text.includes('조퇴')) status = '조퇴';
   else if (text.includes('퇴사')) status = '퇴사';
 
-  // [중요] 이름에 괄호로 붙어있는 연월차 정보 제거 (예: 양나영(6/25오후반차) -> 양나영)
   const rawName = userMap[msg.user] || msg.user || '알 수 없음';
   const userName = cleanUserName(rawName);
   
@@ -222,7 +217,7 @@ function parseAttendanceMessage(msg, today, userMap, masterMap) {
     slackTs: msg.ts,
     timestamp: parseFloat(msg.ts),
     date: today,
-    name: userName, // 정제된 이름 사용
+    name: userName, 
     type: type,
     workType: workType,
     status: status,
@@ -235,7 +230,7 @@ function parseAttendanceMessage(msg, today, userMap, masterMap) {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v9.0 실행');
+  console.log('  Slack 출퇴근 스마트 로거 v10.0 실행');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -278,15 +273,11 @@ async function main() {
       syncCount++;
     }
   }
-  if (syncCount > 0) {
-    console.log(`\n[마스터 동기화] 과거 기록 ${syncCount}건의 근무제/상태를 자동 수정했습니다.`);
-  }
 
   const oldest = lastTs ? String(parseFloat(lastTs) + 0.000001) : '0';
   console.log(`\n--- Slack 채널 메시지 수집 중... ---`);
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
-  console.log(`[Slack] 처리할 새 메시지: ${messages.length}건\n`);
-
+  
   let parsedCount = 0;
 
   for (const msg of messages) {
@@ -298,18 +289,13 @@ async function main() {
     if (!parsed) continue;
 
     if (!masterMap[parsed.name]) {
-      console.log(`  [신규 등록] ${parsed.name} 사원마스터에 추가 중...`);
       await sheets.addEmployee(parsed.name, dateStr);
-      // 신규 추가 시 상태는 '재직'으로 메모리에도 반영
       masterMap[parsed.name] = { status: '재직', joinDate: dateStr, workType: '고정' };
       parsed.workType = '고정'; 
     }
 
     parsedCount++;
     const timeStr = formatTimeDisplay(parsed.timestamp);
-    const typeMark = parsed.type === 'check-in' ? '▶ 출근' : '◀ 퇴근';
-    
-    console.log(`  [${parsed.date} ${timeStr}] ${parsed.name.padEnd(5)} ${typeMark} | 상태:${parsed.status} | 유형:${parsed.workType}`);
 
     if (parsed.type === 'check-in') {
       const newRow = [
@@ -373,8 +359,11 @@ async function main() {
 
   console.log(`\n--- 날짜 전체(주말 포함) 미보고자 마감 검사 실행 ---`);
   
+  // 현재 한국 시간 계산
+  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const currentHour = nowKst.getUTCHours();
+  
   const todayStr = getDateFromTs(Date.now() / 1000);
-  // '재직'이거나 레거시 'active'인 사람 모두 포함
   const activeMembers = Object.keys(masterMap).filter(n => masterMap[n].status === '재직' || masterMap[n].status === 'active');
   
   let dateSet = new Set(messages.map(m => getDateFromTs(m.ts)));
@@ -389,7 +378,14 @@ async function main() {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    allDays.push(`${y}-${m}-${day}`);
+    const targetDateStr = `${y}-${m}-${day}`;
+    
+    // 💡 [핵심 수정] 오늘 날짜인데 아직 밤 11시(23시)가 안 넘었다면 미보고 검사에서 제외합니다!
+    if (targetDateStr === todayStr && currentHour < 23) {
+      continue;
+    }
+    
+    allDays.push(targetDateStr);
   }
 
   let missingCount = 0;
@@ -412,12 +408,6 @@ async function main() {
     }
   }
 
-  if (missingCount > 0) {
-    console.log(`  [결과] 총 ${missingCount}건의 미보고(주말/평일 포함) 누락 데이터를 추가했습니다.`);
-  } else {
-    console.log(`  [결과] 누락된 보고 내역이 없습니다.`);
-  }
-
   // 3. 일괄 반영
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
@@ -437,7 +427,7 @@ async function main() {
   }
 
   console.log(`\n========================================`);
-  console.log(`  ✅ 전체 처리 완료 (동기화: ${syncCount} / 파싱: ${parsedCount} / 미보고: ${missingCount})`);
+  console.log(`  ✅ 전체 처리 완료`);
   console.log(`========================================`);
 }
 
