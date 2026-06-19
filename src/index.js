@@ -353,7 +353,7 @@ async function main() {
   }
   
   const isInitialRun = existingRows.length < 5;
-  let oldest = isInitialRun ? '0' : String(Math.floor(Date.now() / 1000) - (24 * 60 * 60));
+  let oldest = isInitialRun ? '0' : String(Math.floor(Date.now() / 1000) - (72 * 60 * 60));
 
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
   
@@ -530,8 +530,8 @@ async function main() {
         }
       }
 
-      // 이모지 적재 로직
-      if (!isInitialRun) {
+      // 이모지 적재 로직 (★ date === todayStr 조건 추가로 오늘 메시지에만 이모지 작동)
+      if (!isInitialRun && date === todayStr) {
         const isBirthday = masterMap[member].birthday && date.substring(5) === masterMap[member].birthday;
         for (const m of msgs) {
           if (!(m.reactions && m.reactions.some(r => r.users.includes(botUserId)))) {
