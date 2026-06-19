@@ -123,6 +123,7 @@ function normalizeSheetTime(val) {
   return strVal;
 }
 
+// 💡 입사 연차/월차 자동 판단 엔진 (만 1년 기준)
 function getLeaveTypeByTenure(joinDateStr, currentDateStr) {
   if (!joinDateStr || !currentDateStr) return '-';
   try {
@@ -206,7 +207,7 @@ function analyzeFixed(startMin, endMin) {
 function analyzeFlexible(startMin, endMin) {
   const minStart = 8 * 60; 
   const maxStartLimit = 11 * 60; 
-  let effectiveStart = startMin < minStart ? minStart : startMin;
+  let effectiveStart = startMin < minStart : startMin;
   let lateness = startMin > maxStartLimit ? '지각' : '정상';
   const targetEnd = effectiveStart + (9 * 60);
   let overtime = '없음';
@@ -309,7 +310,7 @@ class SheetsClient {
     });
   }
   async readAll(sheetName) {
-    // 💡 열이 하나 줄어들어 범위를 A:L로 조정
+    // 💡 열이 합쳐짐에 따라 범위를 다시 A:L(12개 열)로 조정
     const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:L` });
     return res.data.values || [];
   }
@@ -362,15 +363,15 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v17.3 (비고 열 통합 반영)');
+  console.log('  Slack 출퇴근 스마트 로거 v17.3 (연월차 열 통합)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
   const sheetName = CONFIG.sheets.sheetNames.attendance;
   const masterSheetName = CONFIG.sheets.sheetNames.employee;
   
-  // 💡 '휴가여부' 열을 없애고 맨 뒤의 '비고(휴가사유)' 열로 통합 (총 12개 열 구조)
-  const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '연월차구분', '비고(휴가사유)'];
+  // 💡 '휴가/연월차구분'으로 두 개의 열을 병합 (총 12개 열)
+  const HEADERS = ['날짜', '요일', '이름', '근무제', '상태', '지각여부', '출근시간', '퇴근시간', '야근여부', '야근인정시간(시)', '휴가/연월차구분', '비고'];
   await sheets.ensureSheet(sheetName, HEADERS);
   await sheets.ensureSheet(masterSheetName, ['이름', '상태', '입사일', '퇴사일', '비고', '근무제']);
   
@@ -378,8 +379,8 @@ async function main() {
   
   for (let i = 1; i < existingRows.length; i++) {
     existingRows[i][0] = normalizeSheetDate(existingRows[i][0]);
-    if (existingRows[i][6]) existingRows[i][6] = normalizeSheetTime(existingRows[i][6]);
     if (existingRows[i][7]) existingRows[i][7] = normalizeSheetTime(existingRows[i][7]);
+    if (existingRows[i][8]) existingRows[i][8] = normalizeSheetTime(existingRows[i][8]);
   }
 
   const slack = new SlackClient(CONFIG.slack.token);
@@ -401,8 +402,8 @@ async function main() {
   for (let i = 1; i < existingRows.length; i++) {
     const date = existingRows[i][0];
     const name = existingRows[i][2]; 
-    const finalNote = existingRows[i][11] || ''; // 💡 인덱스 한 칸씩 당겨짐 (비고는 이제 11번)
-    if (finalNote.includes('미보고')) continue;
+    const note = existingRows[i][11] || ''; // 💡 인덱스 조정 (비고는 이제 11번)
+    if (note.includes('미보고')) continue;
     if (date && name) {
       if (!firstActiveDate[name] || date < firstActiveDate[name]) firstActiveDate[name] = date;
     }
@@ -501,10 +502,10 @@ async function main() {
             autoLeaveType = getLeaveTypeByTenure(userJoinDate, date);
           }
           
-          // 💡 휴가여부(leaveStatus)는 비어있으므로 기본 note를 할당
-          const finalMergedNote = leaveStatus || note;
-
-          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '0', autoLeaveType, finalMergedNote];
+          // 💡 우선순위 반영: leaveStatus(휴가여부 데이터)가 우선, 비어있으면 autoLeaveType 적용
+          const mergedLeaveValue = leaveStatus || autoLeaveType;
+          
+          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '0', mergedLeaveValue, note];
           toAppend.push(newRow);
           existingRows.push(newRow); 
         }
@@ -552,12 +553,12 @@ async function main() {
         else if (workTypeKey === 'PART_TIME') analysis = analyzePartTime(startMin, endMin);
       }
 
-      // 💡 핵심 로직: 휴가여부와 비고 병합 (휴가여부 데이터 우선 순위 구현)
-      const finalMergedNote = leaveStatus || note;
+      // 💡 [우선순위 결정 핵심부] 두 필드를 하나로 병합 (휴가여부 데이터가 있으면 우선 적용)
+      const mergedLeaveValue = leaveStatus || autoLeaveType;
 
       if (!row) {
         const newRow = [
-          date, dayName, member, rawWorkType, status, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), autoLeaveType, finalMergedNote
+          date, dayName, member, rawWorkType, status, analysis.lateness, formatTimeFromMins(startMin), formatTimeFromMins(endMin), analysis.overtime, String(analysis.overtimeHours), mergedLeaveValue, note
         ];
         toAppend.push(newRow);
         existingRows.push(newRow);
@@ -572,15 +573,15 @@ async function main() {
         row[7] = formatTimeFromMins(endMin);
         row[8] = analysis.overtime;
         row[9] = String(analysis.overtimeHours);
-        row[10] = autoLeaveType; 
-        row[11] = finalMergedNote; // 💡 병합된 최종 텍스트 대입
+        row[10] = mergedLeaveValue; // 💡 결합된 통합 데이터 매핑
+        row[11] = note; 
 
         toUpdate.push({ range: `'${sheetName}'!B${rowIdx + 1}:L${rowIdx + 1}`, values: [row.slice(1, 12)] });
       }
     }
   }
 
-  // 3. 일괄 쓰기 및 정렬 (범위 L열로 전면 축소 및 조정)
+  // 3. 일괄 쓰기 및 정렬 (범위 L열로 재조정)
   if (toAppend.length > 0) {
     await sheets.sheets.spreadsheets.values.append({
       spreadsheetId: sheets.sheetId, range: `'${sheetName}'!A:L`,
