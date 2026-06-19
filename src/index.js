@@ -207,7 +207,7 @@ function analyzeFixed(startMin, endMin) {
 function analyzeFlexible(startMin, endMin) {
   const minStart = 8 * 60; 
   const maxStartLimit = 11 * 60; 
-  let effectiveStart = startMin < minStart : startMin;
+  let effectiveStart = startMin < minStart ? minStart : startMin;
   let lateness = startMin > maxStartLimit ? '지각' : '정상';
   const targetEnd = effectiveStart + (9 * 60);
   let overtime = '없음';
