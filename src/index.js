@@ -327,7 +327,7 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v20.0 (전체 이력 최초 수집 및 월간 점진 동기화)');
+  console.log('  Slack 출퇴근 스마트 로거 v21.0 (다중연도 + 퇴사자 완벽 추적 및 차단)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -345,7 +345,7 @@ async function main() {
     nameToSlackId[cleanUserName(name)] = id;
   }
 
-  // 🟢 [복원 및 개선] 초기 수집 여부 판별 로직
+  // 🟢 [핵심] 올해 출퇴근기록 시트의 데이터 개수를 확인하여 초기 실행(전체 수집) 여부를 판별
   const nowMs = Date.now() + 9 * 60 * 60 * 1000;
   const currentYear = new Date(nowMs).getFullYear();
   let isInitialRun = true;
@@ -353,24 +353,22 @@ async function main() {
   try {
     const testSheetName = `${CONFIG.sheets.sheetNames.attendance}_${currentYear}`;
     const testRes = await sheets.sheets.spreadsheets.values.get({ spreadsheetId: sheets.sheetId, range: `'${testSheetName}'!A1:A5` });
-    // 올해 시트에 2줄 이상(헤더 포함 데이터가 있음) 기록되어 있다면 초기 수집이 아님
     if (testRes.data.values && testRes.data.values.length >= 2) {
       isInitialRun = false;
     }
   } catch (e) {
-    // 시트가 아예 없으면 초기 실행으로 간주
     isInitialRun = true; 
   }
 
-  // 🟢 초기 실행이면 슬랙 전체('0')를 긁어오고, 아니면 최근 30일치만 긁어옵니다.
+  // 초기 실행 시 '0'(전체), 아닐 시 최근 30일(크로스오버 대비용) 가져옴
   const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60;
   let oldest = isInitialRun ? '0' : String(Math.floor(Date.now() / 1000) - THIRTY_DAYS_SEC);
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
 
-  // 🟢 처리 대상 연도를 슬랙 메시지 기반으로 동적 확장 (초기 실행 시 수년 치 시트 확보 목적)
+  // 메시지 기반 동적 연도 수집
   const targetYearsSet = new Set();
   targetYearsSet.add(currentYear);
-  targetYearsSet.add(new Date(nowMs - (30 * 24 * 60 * 60 * 1000)).getFullYear()); // 30일 걸치는 지난 연도는 무조건 포함
+  targetYearsSet.add(new Date(nowMs - (30 * 24 * 60 * 60 * 1000)).getFullYear()); 
 
   if (isInitialRun) {
     for (const msg of messages) {
@@ -380,7 +378,7 @@ async function main() {
   }
   const targetYears = Array.from(targetYearsSet).sort();
 
-  // 🟢 동적으로 감지된 모든 연도 시트 로드 (없으면 자동 생성)
+  // 감지된 연도별 시트 동적 로드 및 배열 준비
   const sheetData = {}; 
   const toAppendByYear = {}; 
   const toUpdateByYear = {}; 
@@ -405,6 +403,7 @@ async function main() {
   const firstActiveDate = {};
   const lastActiveDate = {};
 
+  // 기존 시트 기록에서 입사/마지막 활동일 추출
   for (const year of targetYears) {
     const rows = sheetData[year].existingRows;
     for (let i = 1; i < rows.length; i++) {
@@ -434,6 +433,7 @@ async function main() {
     if (!masterMap[userName]) {
       const joinDate = firstActiveDate[userName] || dateStr;
       await sheets.addEmployee(userName, joinDate);
+      // 아직 rowIndex가 없으므로 아래 단계에서 한 번 더 갱신해줍니다.
       masterMap[userName] = { status: '재직', joinDate: joinDate, workType: '고정', birthday: '', leaveDate: '' };
     }
 
@@ -468,6 +468,7 @@ async function main() {
       msg.correctionTime = hr * 60 + (timeMatch[2] ? parseInt(timeMatch[2], 10) : 0);
     }
 
+    // 슬랙 메시지 기반 마지막 활동일 갱신
     if (!lastActiveDate[userName] || targetDateStr > lastActiveDate[userName]) {
       if (!text.includes('결근') && !text.includes('연차')) lastActiveDate[userName] = targetDateStr;
     }
@@ -495,22 +496,36 @@ async function main() {
   const limitDateObj = new Date(nowMs - (30 * 24 * 60 * 60 * 1000));
   const limitDateStr = `${limitDateObj.getFullYear()}-${String(limitDateObj.getMonth() + 1).padStart(2, '0')}-${String(limitDateObj.getDate()).padStart(2, '0')}`;
 
+  // 🟢 [핵심 버그 수정] 이 시점에서 사원마스터를 한 번 더 불러와 새로 등록된 사원의 '행 번호(rowIndex)'를 확보합니다.
+  const updatedMasterMap = await sheets.getEmployeeMaster();
+  for (const member of Object.keys(updatedMasterMap)) {
+    if (masterMap[member]) masterMap[member].rowIndex = updatedMasterMap[member].rowIndex;
+  }
+
   const masterUpdates = [];
   const todayObj = new Date(todayStr);
 
   for (const member of targetMembers) {
     const emp = masterMap[member];
-    if (emp.status === '재직' || emp.status === 'active') {
+    
+    // 사원마스터에 '퇴사'로 적혀있으나 날짜가 누락된 사람도 체크 대상에 포함
+    let isAlreadyResigned = (emp.status === '퇴사' || emp.status === '퇴사자');
+    let needsLeaveDate = isAlreadyResigned && !emp.leaveDate;
+
+    if (emp.status === '재직' || emp.status === 'active' || needsLeaveDate) {
       let isResigned = false;
       let lastMsgDateStr = lastActiveDate[member] || firstActiveDate[member] || minDateStr;
 
+      // 1. 본인 메시지에 '퇴사' 언급 여부 체크
       for (const d of Object.keys(groupedMsgs)) {
         if (groupedMsgs[d][member] && groupedMsgs[d][member].some(m => m.text.includes('퇴사'))) {
           isResigned = true;
+          if (d > lastMsgDateStr) lastMsgDateStr = d; // 늦은 퇴사글이 있으면 그날로 연장
         }
       }
 
-      if (!isResigned) {
+      // 2. 최근 14일 슬랙 미사용 시 자동 퇴사 간주
+      if (!isResigned && !isAlreadyResigned) {
         const lastMsgObj = new Date(lastMsgDateStr);
         const diffDays = Math.floor((todayObj - lastMsgObj) / (1000 * 60 * 60 * 24));
         if (diffDays >= 14) {
@@ -518,14 +533,15 @@ async function main() {
         }
       }
 
-      if (isResigned) {
+      if (isResigned || needsLeaveDate) {
         const leaveObj = new Date(lastMsgDateStr);
-        leaveObj.setDate(leaveObj.getDate() + 1);
+        leaveObj.setDate(leaveObj.getDate() + 1); // 마지막 활동일의 다음 날
         const leaveDateStr = `${leaveObj.getFullYear()}-${String(leaveObj.getMonth() + 1).padStart(2, '0')}-${String(leaveObj.getDate()).padStart(2, '0')}`;
         
         emp.status = '퇴사';
         emp.leaveDate = leaveDateStr;
 
+        // 확보한 rowIndex로 정상적으로 시트 업데이트 예약
         if (emp.rowIndex) {
           masterUpdates.push({
             range: `'${masterSheetName}'!B${emp.rowIndex}:D${emp.rowIndex}`,
@@ -545,7 +561,7 @@ async function main() {
   }
 
   for (const date of allDays) {
-    // 🟢 [초기 수집 로직 복원] 초기 수집(isInitialRun)일 경우 과거 전체 데이터 무조건 처리, 아니면 30일 커트라인 적용
+    // 🟢 [초기 수집 로직] 초기 수집이 아닐 때만 30일 방어선 적용
     if (!isInitialRun && date < limitDateStr) continue;
 
     const dObj = new Date(date);
@@ -569,6 +585,7 @@ async function main() {
       const rowIdx = currentExistingRows.findIndex(r => r[0] === date && r[2] === member); 
       const row = rowIdx >= 0 ? currentExistingRows[rowIdx] : null;
 
+      // 🟢 [핵심] 퇴사일 이후는 기록 작성 아예 생략 (기존 결근 줄이 있었다면 비워줌)
       if (emp.status === '퇴사' || emp.status === '퇴사자') {
         if (emp.leaveDate && date >= emp.leaveDate) {
           if (row) {
@@ -621,6 +638,7 @@ async function main() {
 
       const latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
 
+      // 13:30 ~ 14:30 사이 출근 시, 휴가 키워드가 없어도 '오전반차' 자동 할당
       if (!leaveStatus && latenessCheckMin >= 13 * 60 + 30 && latenessCheckMin <= 14 * 60 + 30) {
         leaveStatus = '오전반차';
         allText = '[자동반차판정] ' + allText;
@@ -655,6 +673,7 @@ async function main() {
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(latenessCheckMin, endMin);
         else analysis = analyzePartTime(latenessCheckMin, endMin);
 
+        // 오전반차 사용자의 경우 14:10 이전 출근 시 지각 면제
         if (leaveStatus === '오전반차' || leaveStatus === '반차') {
           if (latenessCheckMin <= 14 * 60 + 10) {
             analysis.lateness = '정상';
