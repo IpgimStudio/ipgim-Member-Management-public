@@ -3,12 +3,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
 import fetch from 'node-fetch';
+import crypto from 'crypto'; // 해시 생성을 위한 모듈 추가
 
 // ─────────────────── 환경설정 ───────────────────
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = path.resolve(__dirname, './config.json');
 let CONFIG = {};
-
 if (fs.existsSync(CONFIG_FILE)) {
   CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
 }
@@ -20,7 +20,6 @@ if (process.env.SLACK_CHANNEL_ID) CONFIG.slack.channelId = process.env.SLACK_CHA
 if (process.env.SHEET_ID) CONFIG.sheets.sheetId = process.env.SHEET_ID;
 if (process.env.GOOGLE_SERVICE_EMAIL) CONFIG.sheets.serviceEmail = process.env.GOOGLE_SERVICE_EMAIL;
 if (process.env.GOOGLE_PRIVATE_KEY) CONFIG.sheets.privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
-
 if (!CONFIG.sheets.sheetNames) {
   CONFIG.sheets.sheetNames = { 
     attendance: '출퇴근기록', 
@@ -30,7 +29,6 @@ if (!CONFIG.sheets.sheetNames) {
 } else if (!CONFIG.sheets.sheetNames.calendar) {
   CONFIG.sheets.sheetNames.calendar = '캘린더마스터';
 }
-
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
 // ─────────────────── 유틸리티 및 분석 엔진 ───────────────────
@@ -40,22 +38,18 @@ function formatTimeFromMins(totalMinutes) {
   const m = totalMinutes % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
-
 function getDateFromTs(ts) {
   const kst = new Date(parseFloat(ts) * 1000 + 9 * 60 * 60 * 1000);
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
 }
-
 function getYesterdayDateStr(dateStr) {
   const d = new Date(dateStr);
   d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-
 function getKstObj(ts) {
   return new Date(parseFloat(ts) * 1000 + 9 * 60 * 60 * 1000);
 }
-
 function normalizeSheetDate(val) {
   if (!val) return '';
   const strVal = String(val).trim();
@@ -68,7 +62,6 @@ function normalizeSheetDate(val) {
   if (clean.endsWith('-')) clean = clean.slice(0, -1);
   return clean.length === 10 ? clean : strVal;
 }
-
 function normalizeSheetTime(val) {
   if (!val || val === '-') return '-';
   const strVal = String(val).trim();
@@ -78,7 +71,6 @@ function normalizeSheetTime(val) {
   }
   return strVal;
 }
-
 function getLeaveTypeByTenure(joinDateStr, currentDateStr) {
   if (!joinDateStr || !currentDateStr) return '-';
   try {
@@ -89,16 +81,13 @@ function getLeaveTypeByTenure(joinDateStr, currentDateStr) {
     return current >= oneYearLater ? '연차' : '월차';
   } catch (e) { return '-'; }
 }
-
 function cleanUserName(rawName) {
   if (!rawName) return '알 수 없음';
   return rawName.replace(/\s*[\(\[\{<].*?[\)\]\}>]\s*/g, '').trim();
 }
-
 function snapToNearestHour(minutes) {
   return Math.round(minutes / 60) * 60;
 }
-
 function extractTimeFromText(text, ts, isMidnightShift = false) {
   const times = [];
   const kstObj = getKstObj(ts);
@@ -124,7 +113,6 @@ function extractTimeFromText(text, ts, isMidnightShift = false) {
   }
   return times;
 }
-
 function extractLeaveStatus(text) {
   let cleanText = text.replace(/(내일|익일|모레|다음주|차주|다음 주|월요일|화요일|수요일|목요일|금요일)[^.!|\n]*(휴가|연차|월차|반차|조퇴|결근|예비군|민방위)/g, '');
   cleanText = cleanText.replace(/(휴가|연차|월차|반차|조퇴|결근|예비군|민방위)[^.!|\n]*(예정|계획)/g, '');
@@ -144,7 +132,6 @@ function extractLeaveStatus(text) {
   if (cleanText.includes('민방위')) return '민방위';
   return '';
 }
-
 function analyzeFixed(startMin, endMin) {
   const workStart = 9 * 60; 
   const workEnd = 18 * 60; 
@@ -165,7 +152,6 @@ function analyzeFixed(startMin, endMin) {
   }
   return { lateness, overtime, overtimeHours };
 }
-
 function analyzeFlexible(startMin, endMin) {
   const minStart = 8 * 60; 
   const maxStartLimit = 11 * 60; 
@@ -185,7 +171,6 @@ function analyzeFlexible(startMin, endMin) {
   }
   return { lateness, overtime, overtimeHours };
 }
-
 function analyzePartTime(startMin, endMin) {
   const workStart = 9 * 60;
   const workEnd = 12 * 60;
@@ -327,7 +312,7 @@ class SheetsClient {
 // ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v21.0 (다중연도 + 퇴사자 완벽 추적 및 차단)');
+  console.log('  Slack 출퇴근 스마트 로거 v22.0 (초강력 풀 스위퍼 - 서버리스 해시 감지 탑재)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -345,7 +330,6 @@ async function main() {
     nameToSlackId[cleanUserName(name)] = id;
   }
 
-  // 🟢 [핵심] 올해 출퇴근기록 시트의 데이터 개수를 확인하여 초기 실행(전체 수집) 여부를 판별
   const nowMs = Date.now() + 9 * 60 * 60 * 1000;
   const currentYear = new Date(nowMs).getFullYear();
   let isInitialRun = true;
@@ -360,25 +344,59 @@ async function main() {
     isInitialRun = true; 
   }
 
-  // 초기 실행 시 '0'(전체), 아닐 시 최근 30일(크로스오버 대비용) 가져옴
+  const masterMap = await sheets.getEmployeeMaster();
+
+  // 🟢 [추가] 마스터 데이터 해시(Hash) 생성 및 비교 로직 ──────────────────
+  const currentMasterData = JSON.stringify(masterMap) + JSON.stringify(holidaysMap);
+  const currentHash = crypto.createHash('sha256').update(currentMasterData).digest('hex');
+
+  await sheets.ensureSheet('시스템설정', ['설정명', '값', '설명']);
+  const sysRows = await sheets.readAll('시스템설정');
+  let savedHash = '';
+  let hashRowIndex = -1;
+
+  for (let i = 1; i < sysRows.length; i++) {
+    if (sysRows[i][0] === 'MASTER_HASH') {
+      savedHash = sysRows[i][1];
+      hashRowIndex = i + 1;
+      break;
+    }
+  }
+
+  const needsFullReconcile = (currentHash !== savedHash) || isInitialRun;
+
+  if (needsFullReconcile) {
+    console.log('🔄 [풀 스위퍼] 사원/캘린더 마스터 변경이 감지되었습니다. 과거 전체 데이터를 검증합니다...');
+  } else {
+    console.log('✅ 마스터 데이터 변경 없음. 풀 스위퍼를 생략하고 최근 기록만 동기화합니다.');
+  }
+  // ─────────────────────────────────────────────────────────────
+
   const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60;
   let oldest = isInitialRun ? '0' : String(Math.floor(Date.now() / 1000) - THIRTY_DAYS_SEC);
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
 
-  // 메시지 기반 동적 연도 수집
+  const sheetMetadata = await sheets.sheets.spreadsheets.get({ spreadsheetId: sheets.sheetId });
   const targetYearsSet = new Set();
-  targetYearsSet.add(currentYear);
-  targetYearsSet.add(new Date(nowMs - (30 * 24 * 60 * 60 * 1000)).getFullYear()); 
-
+  
+  sheetMetadata.data.sheets.forEach(s => {
+    const title = s.properties.title;
+    if (title.startsWith(CONFIG.sheets.sheetNames.attendance + '_')) {
+      const y = parseInt(title.split('_')[1]);
+      if (!isNaN(y)) targetYearsSet.add(y);
+    }
+  });
+  
   if (isInitialRun) {
     for (const msg of messages) {
       const yyyy = new Date(parseFloat(msg.ts) * 1000 + 9 * 60 * 60 * 1000).getFullYear();
       targetYearsSet.add(yyyy);
     }
   }
+  
+  targetYearsSet.add(currentYear);
   const targetYears = Array.from(targetYearsSet).sort();
 
-  // 감지된 연도별 시트 동적 로드 및 배열 준비
   const sheetData = {}; 
   const toAppendByYear = {}; 
   const toUpdateByYear = {}; 
@@ -399,11 +417,9 @@ async function main() {
     toUpdateByYear[year] = [];
   }
 
-  const masterMap = await sheets.getEmployeeMaster();
   const firstActiveDate = {};
   const lastActiveDate = {};
 
-  // 기존 시트 기록에서 입사/마지막 활동일 추출
   for (const year of targetYears) {
     const rows = sheetData[year].existingRows;
     for (let i = 1; i < rows.length; i++) {
@@ -433,7 +449,6 @@ async function main() {
     if (!masterMap[userName]) {
       const joinDate = firstActiveDate[userName] || dateStr;
       await sheets.addEmployee(userName, joinDate);
-      // 아직 rowIndex가 없으므로 아래 단계에서 한 번 더 갱신해줍니다.
       masterMap[userName] = { status: '재직', joinDate: joinDate, workType: '고정', birthday: '', leaveDate: '' };
     }
 
@@ -468,7 +483,6 @@ async function main() {
       msg.correctionTime = hr * 60 + (timeMatch[2] ? parseInt(timeMatch[2], 10) : 0);
     }
 
-    // 슬랙 메시지 기반 마지막 활동일 갱신
     if (!lastActiveDate[userName] || targetDateStr > lastActiveDate[userName]) {
       if (!text.includes('결근') && !text.includes('연차')) lastActiveDate[userName] = targetDateStr;
     }
@@ -480,8 +494,10 @@ async function main() {
   }
 
   const todayStr = getDateFromTs(Date.now() / 1000);
-  let minDateStr = todayStr;
-  if (Object.keys(groupedMsgs).sort().length > 0) minDateStr = Object.keys(groupedMsgs).sort()[0];
+  const limitDateObj = new Date(nowMs - (30 * 24 * 60 * 60 * 1000));
+  const limitDateStr = `${limitDateObj.getFullYear()}-${String(limitDateObj.getMonth() + 1).padStart(2, '0')}-${String(limitDateObj.getDate()).padStart(2, '0')}`;
+  
+  let minDateStr = isInitialRun ? (Object.keys(groupedMsgs).sort()[0] || todayStr) : limitDateStr;
   
   const allDays = [];
   for (let d = new Date(minDateStr); d <= new Date(todayStr); d.setDate(d.getDate() + 1)) {
@@ -493,10 +509,6 @@ async function main() {
   const currentHour = new Date(nowMs).getUTCHours(); 
   const currentMinute = new Date(nowMs).getUTCMinutes();
   
-  const limitDateObj = new Date(nowMs - (30 * 24 * 60 * 60 * 1000));
-  const limitDateStr = `${limitDateObj.getFullYear()}-${String(limitDateObj.getMonth() + 1).padStart(2, '0')}-${String(limitDateObj.getDate()).padStart(2, '0')}`;
-
-  // 🟢 [핵심 버그 수정] 이 시점에서 사원마스터를 한 번 더 불러와 새로 등록된 사원의 '행 번호(rowIndex)'를 확보합니다.
   const updatedMasterMap = await sheets.getEmployeeMaster();
   for (const member of Object.keys(updatedMasterMap)) {
     if (masterMap[member]) masterMap[member].rowIndex = updatedMasterMap[member].rowIndex;
@@ -507,8 +519,6 @@ async function main() {
 
   for (const member of targetMembers) {
     const emp = masterMap[member];
-    
-    // 사원마스터에 '퇴사'로 적혀있으나 날짜가 누락된 사람도 체크 대상에 포함
     let isAlreadyResigned = (emp.status === '퇴사' || emp.status === '퇴사자');
     let needsLeaveDate = isAlreadyResigned && !emp.leaveDate;
 
@@ -516,15 +526,13 @@ async function main() {
       let isResigned = false;
       let lastMsgDateStr = lastActiveDate[member] || firstActiveDate[member] || minDateStr;
 
-      // 1. 본인 메시지에 '퇴사' 언급 여부 체크
       for (const d of Object.keys(groupedMsgs)) {
         if (groupedMsgs[d][member] && groupedMsgs[d][member].some(m => m.text.includes('퇴사'))) {
           isResigned = true;
-          if (d > lastMsgDateStr) lastMsgDateStr = d; // 늦은 퇴사글이 있으면 그날로 연장
+          if (d > lastMsgDateStr) lastMsgDateStr = d; 
         }
       }
 
-      // 2. 최근 14일 슬랙 미사용 시 자동 퇴사 간주
       if (!isResigned && !isAlreadyResigned) {
         const lastMsgObj = new Date(lastMsgDateStr);
         const diffDays = Math.floor((todayObj - lastMsgObj) / (1000 * 60 * 60 * 24));
@@ -535,13 +543,12 @@ async function main() {
 
       if (isResigned || needsLeaveDate) {
         const leaveObj = new Date(lastMsgDateStr);
-        leaveObj.setDate(leaveObj.getDate() + 1); // 마지막 활동일의 다음 날
+        leaveObj.setDate(leaveObj.getDate() + 1); 
         const leaveDateStr = `${leaveObj.getFullYear()}-${String(leaveObj.getMonth() + 1).padStart(2, '0')}-${String(leaveObj.getDate()).padStart(2, '0')}`;
         
         emp.status = '퇴사';
         emp.leaveDate = leaveDateStr;
 
-        // 확보한 rowIndex로 정상적으로 시트 업데이트 예약
         if (emp.rowIndex) {
           masterUpdates.push({
             range: `'${masterSheetName}'!B${emp.rowIndex}:D${emp.rowIndex}`,
@@ -560,8 +567,10 @@ async function main() {
     console.log(`[안내] 사원마스터 시트에 ${masterUpdates.length}명의 자동 퇴사 처리가 반영되었습니다.`);
   }
 
+  // =========================================================================
+  // 1단계: 최근 30일(또는 초기) 슬랙 기반 동기화 루프
+  // =========================================================================
   for (const date of allDays) {
-    // 🟢 [초기 수집 로직] 초기 수집이 아닐 때만 30일 방어선 적용
     if (!isInitialRun && date < limitDateStr) continue;
 
     const dObj = new Date(date);
@@ -585,11 +594,11 @@ async function main() {
       const rowIdx = currentExistingRows.findIndex(r => r[0] === date && r[2] === member); 
       const row = rowIdx >= 0 ? currentExistingRows[rowIdx] : null;
 
-      // 🟢 [핵심] 퇴사일 이후는 기록 작성 아예 생략 (기존 결근 줄이 있었다면 비워줌)
       if (emp.status === '퇴사' || emp.status === '퇴사자') {
         if (emp.leaveDate && date >= emp.leaveDate) {
           if (row) {
             toUpdateByYear[yyyy].push({ range: `'${currentSheetName}'!A${rowIdx + 1}:M${rowIdx + 1}`, values: [Array(13).fill('')] });
+            currentExistingRows[rowIdx] = Array(13).fill(''); 
           }
           continue; 
         }
@@ -635,10 +644,8 @@ async function main() {
       const rawStartMin = times[0];
       let endMin = forcedEndMin !== null ? forcedEndMin : (times.length > 1 ? times[times.length - 1] : null);
       const startMin = snapToNearestHour(rawStartMin);
-
       const latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
 
-      // 13:30 ~ 14:30 사이 출근 시, 휴가 키워드가 없어도 '오전반차' 자동 할당
       if (!leaveStatus && latenessCheckMin >= 13 * 60 + 30 && latenessCheckMin <= 14 * 60 + 30) {
         leaveStatus = '오전반차';
         allText = '[자동반차판정] ' + allText;
@@ -673,7 +680,6 @@ async function main() {
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(latenessCheckMin, endMin);
         else analysis = analyzePartTime(latenessCheckMin, endMin);
 
-        // 오전반차 사용자의 경우 14:10 이전 출근 시 지각 면제
         if (leaveStatus === '오전반차' || leaveStatus === '반차') {
           if (latenessCheckMin <= 14 * 60 + 10) {
             analysis.lateness = '정상';
@@ -702,6 +708,84 @@ async function main() {
     }
   }
 
+  // =========================================================================
+  // 2단계: [새로운 엔진] 모든 연도의 과거 기록 수동 변경 소급 적용 (Full Sweeper)
+  // =========================================================================
+  if (needsFullReconcile) {
+    for (const year of targetYears) {
+      const currentExistingRows = sheetData[year].existingRows;
+      const currentSheetName = sheetData[year].sheetName;
+
+      for (let i = 1; i < currentExistingRows.length; i++) {
+        const row = currentExistingRows[i];
+        const date = row[0];
+        const member = row[2];
+
+        if (!date || !member || (!isInitialRun && date >= limitDateStr)) continue;
+
+        const emp = masterMap[member];
+        if (!emp) continue;
+
+        let needsUpdate = false;
+
+        if (emp.status === '퇴사' || emp.status === '퇴사자') {
+          if (emp.leaveDate && date >= emp.leaveDate) {
+            if (row.some(val => val !== '')) {
+              toUpdateByYear[year].push({ range: `'${currentSheetName}'!A${i + 1}:M${i + 1}`, values: [Array(13).fill('')] });
+              currentExistingRows[i] = Array(13).fill(''); 
+            }
+            continue;
+          }
+        }
+
+        if (row[3] !== emp.workType) {
+          row[3] = emp.workType;
+          needsUpdate = true;
+        }
+
+        const dObj = new Date(date);
+        const holidayName = holidaysMap[date];
+        const isWeekend = (dObj.getDay() === 0 || dObj.getDay() === 6);
+        
+        if (row[4] === '결근' && (holidayName || isWeekend)) {
+          row[4] = '휴무';
+          row[12] = holidayName ? `공휴일(${holidayName})` : `주말(${DAY_NAMES[dObj.getDay()]})`;
+          needsUpdate = true;
+        } 
+        else if (row[4] === '휴무' && !holidayName && !isWeekend && row[12] && (row[12].includes('공휴일') || row[12].includes('주말'))) {
+          row[4] = '결근';
+          row[12] = '평일 (미보고)';
+          needsUpdate = true;
+        }
+
+        if (needsUpdate) {
+          toUpdateByYear[year].push({ range: `'${currentSheetName}'!B${i + 1}:M${i + 1}`, values: [row.slice(1, 13)] });
+        }
+      }
+    }
+
+    // 🟢 [추가] 풀 스위퍼 처리가 끝난 후 새로운 해시값을 '시스템설정' 시트에 업데이트
+    if (hashRowIndex > 0) {
+      await sheets.sheets.spreadsheets.values.update({
+        spreadsheetId: sheets.sheetId,
+        range: `'시스템설정'!B${hashRowIndex}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [[currentHash]] }
+      });
+    } else {
+      await sheets.sheets.spreadsheets.values.append({
+        spreadsheetId: sheets.sheetId,
+        range: `'시스템설정'!A:C`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: [['MASTER_HASH', currentHash, '사원/캘린더 변경 감지용 해시(건드리지 마세요)']] }
+      });
+    }
+  } // 👈 if (needsFullReconcile) 닫힘
+
+  // =========================================================================
+  // 3단계: 구글 시트 일괄 API 요청 (Batch Update & Append)
+  // =========================================================================
   for (const year of targetYears) {
     const sName = sheetData[year].sheetName;
     const appends = toAppendByYear[year];
@@ -728,9 +812,13 @@ async function main() {
     }
   }
 
+  // ─────────────────── Slack DM 발송 로직 ───────────────────
   if (dmQueue.length > 0) {
     for (const dm of dmQueue) {
-      try { await slack.call('chat.postMessage', { channel: dm.userId, text: dm.text }); await new Promise(res => setTimeout(resolve, 300)); } catch (err) {}
+      try { 
+        await slack.call('chat.postMessage', { channel: dm.userId, text: dm.text }); 
+        await new Promise(res => setTimeout(res, 300)); // 기존 코드의 resolve 오류 수정
+      } catch (err) {}
     }
   }
   
