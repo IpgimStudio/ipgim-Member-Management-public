@@ -594,6 +594,15 @@ async function main() {
       const rowIdx = currentExistingRows.findIndex(r => r[0] === date && r[2] === member); 
       const row = rowIdx >= 0 ? currentExistingRows[rowIdx] : null;
 
+      // 🛑 [여기에 방어벽 추가!] 봇이나 관리자가 수동 정정한 행은 스위퍼가 덮어쓰지 않도록 보호 (Lock)
+      if (row && row[12] && (
+          row[12].includes('[슬랙수정]') || 
+          row[12].includes('[슬랙신규]') || 
+          row[12].includes('[관리자정정]')
+      )) {
+        continue; // 이 줄은 무시하고 다음 사람/날짜로 넘어감
+      }
+
       if (emp.status === '퇴사' || emp.status === '퇴사자') {
         if (emp.leaveDate && date >= emp.leaveDate) {
           if (row) {
@@ -718,6 +727,16 @@ async function main() {
 
       for (let i = 1; i < currentExistingRows.length; i++) {
         const row = currentExistingRows[i];
+
+        // 🛑 [여기에 방어벽 추가!]
+        if (row[12] && (
+            row[12].includes('[슬랙수정]') || 
+            row[12].includes('[슬랙신규]') || 
+            row[12].includes('[관리자정정]')
+        )) {
+          continue; // 수동 정정된 과거 데이터 보호
+        }
+        
         const date = row[0];
         const member = row[2];
 
