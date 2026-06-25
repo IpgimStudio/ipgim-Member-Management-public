@@ -52,7 +52,13 @@ function getKstObj(ts) {
 }
 function normalizeSheetDate(val) {
   if (!val) return '';
-  const strVal = String(val).trim();
+  let strVal = String(val).trim();
+
+  // 💡 [수정] 맨 앞의 따옴표(') 기호를 텍스트 강제 지정으로 인식하고 제거합니다.
+  if (strVal.startsWith("'")) {
+    strVal = strVal.slice(1);
+  }
+
   if (/^\d{5}$/.test(strVal)) {
     const excelEpoch = new Date(Date.UTC(1899, 11, 30));
     const date = new Date(excelEpoch.getTime() + parseInt(strVal) * 86400000);
@@ -249,7 +255,13 @@ class SheetsClient {
     const res = await this.sheets.spreadsheets.get({ spreadsheetId: this.sheetId });
     if (res.data.sheets.some(s => s.properties.title === sheetName)) return;
     await this.sheets.spreadsheets.batchUpdate({ spreadsheetId: this.sheetId, requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] } });
-    await this.sheets.spreadsheets.values.update({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A1`, valueInputOption: 'RAW', requestBody: { values: [headerRow] } });
+    
+    await this.sheets.spreadsheets.values.update({ 
+      spreadsheetId: this.sheetId, 
+      range: `'${sheetName}'!A1`, 
+      valueInputOption: 'USER_ENTERED', // 💡 RAW에서 USER_ENTERED로 변경
+      requestBody: { values: [headerRow] } 
+    });
   }
   async readAll(sheetName) {
     const res = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.sheetId, range: `'${sheetName}'!A:M` }); 
@@ -819,7 +831,7 @@ if (!row) {
   // =========================================================================
   // 3단계: 구글 시트 일괄 API 요청 (Batch Update & Append)
   // =========================================================================
-  for (const year of targetYears) {
+for (const year of targetYears) {
     const sName = sheetData[year].sheetName;
     const appends = toAppendByYear[year];
     const updates = toUpdateByYear[year];
@@ -828,7 +840,7 @@ if (!row) {
       await sheets.sheets.spreadsheets.values.append({ 
         spreadsheetId: sheets.sheetId, 
         range: `'${sName}'!A:M`, 
-        valueInputOption: 'RAW', 
+        valueInputOption: 'USER_ENTERED', // 💡 RAW에서 USER_ENTERED로 변경
         insertDataOption: 'INSERT_ROWS', 
         requestBody: { values: appends } 
       });
@@ -836,7 +848,10 @@ if (!row) {
     if (updates.length > 0) {
       await sheets.sheets.spreadsheets.values.batchUpdate({ 
         spreadsheetId: sheets.sheetId, 
-        requestBody: { valueInputOption: 'RAW', data: updates } 
+        requestBody: { 
+          valueInputOption: 'USER_ENTERED', // 💡 RAW에서 USER_ENTERED로 변경
+          data: updates 
+        } 
       });
     }
     
