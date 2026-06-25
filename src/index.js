@@ -594,7 +594,7 @@ async function main() {
       if (date < userJoinDate) continue;
 
       const msgs = groupedMsgs[date]?.[member] || [];
-      const rowIdx = currentExistingRows.findIndex(r => r[0] === date && r[2] === member); 
+      const rowIdx = currentExistingRows.findIndex(r => r && r[0] === date && (r[2] || '').trim() === member); 
       const row = rowIdx >= 0 ? currentExistingRows[rowIdx] : null;
 
       if (row && row[12] && (
@@ -705,12 +705,15 @@ async function main() {
         }
       }
 
-      if (!row) {
+if (!row) {
         const newRow = [
           date, dayName, member, rawWorkType, status, analysis.lateness, 
           formatTimeFromMins(startMin), formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin), formatTimeFromMins(endMin), 
           analysis.overtime, String(analysis.overtimeHours), leaveStatus || autoLeaveType, note
         ];
+        
+        newRow._isNew = true; 
+
         toAppendByYear[yyyy].push(newRow); 
         currentExistingRows.push(newRow);
       } else {
@@ -726,7 +729,7 @@ async function main() {
     }
   }
 
-  // =========================================================================
+  // ==========================================================================
   // 2단계: [새로운 엔진] 모든 연도의 과거 기록 수동 변경 소급 적용 (Full Sweeper)
   // =========================================================================
   if (needsFullReconcile) {
@@ -736,6 +739,9 @@ async function main() {
 
       for (let i = 1; i < currentExistingRows.length; i++) {
         const row = currentExistingRows[i];
+
+        // 💡 핵심 수정 3: 시트에 Insert 되기 전인 메모리 상의 새 행은 소급 업데이트 대상에서 제외 (인덱스 꼬임 원천 차단)
+        if (row._isNew) continue; 
 
         if (row[12] && (
             row[12].includes('[슬랙수정]') || 
