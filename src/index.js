@@ -651,14 +651,21 @@ async function main() {
         }
       }
       times.sort((a, b) => a - b);
-      
+            
       const rawStartMin = times[0];
       let endMin = forcedEndMin !== null ? forcedEndMin : (times.length > 1 ? times[times.length - 1] : null);
       const startMin = snapToNearestHour(rawStartMin);
       const latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
 
+      // 1. 기존 로직: 출근이 13:30 ~ 14:30 사이일 경우 '오전반차'로 자동 판정
       if (!leaveStatus && latenessCheckMin >= 13 * 60 + 30 && latenessCheckMin <= 14 * 60 + 30) {
         leaveStatus = '오전반차';
+        allText = '[자동반차판정] ' + allText;
+      }
+
+      // 💡 2. 신규 추가 로직: 퇴근이 13:30 ~ 15:30 사이일 경우 '오후반차'로 자동 판정
+      if (!leaveStatus && endMin !== null && endMin >= 13 * 60 + 30 && endMin <= 15 * 60 + 30) {
+        leaveStatus = '오후반차';
         allText = '[자동반차판정] ' + allText;
       }
 
