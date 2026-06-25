@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
 import fetch from 'node-fetch';
-import crypto from 'crypto'; // 해시 생성을 위한 모듈 추가
+import crypto from 'crypto';
 
 // ─────────────────── 환경설정 ───────────────────
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -54,7 +54,6 @@ function normalizeSheetDate(val) {
   if (!val) return '';
   let strVal = String(val).trim();
 
-  // 💡 [수정] 맨 앞의 따옴표(') 기호를 텍스트 강제 지정으로 인식하고 제거합니다.
   if (strVal.startsWith("'")) {
     strVal = strVal.slice(1);
   }
@@ -259,7 +258,7 @@ class SheetsClient {
     await this.sheets.spreadsheets.values.update({ 
       spreadsheetId: this.sheetId, 
       range: `'${sheetName}'!A1`, 
-      valueInputOption: 'USER_ENTERED', // 💡 RAW에서 USER_ENTERED로 변경
+      valueInputOption: 'USER_ENTERED', 
       requestBody: { values: [headerRow] } 
     });
   }
@@ -358,7 +357,7 @@ async function main() {
 
   const masterMap = await sheets.getEmployeeMaster();
 
-  // 🟢 [추가] 마스터 데이터 해시(Hash) 생성 및 비교 로직 ──────────────────
+  // 마스터 데이터 해시(Hash) 생성 및 비교 로직 ──────────────────
   const currentMasterData = JSON.stringify(masterMap) + JSON.stringify(holidaysMap);
   const currentHash = crypto.createHash('sha256').update(currentMasterData).digest('hex');
 
@@ -517,7 +516,10 @@ async function main() {
   }
 
   const dmQueue = [];
-  const targetMembers = Object.keys(masterMap).filter(n => !masterMap[n].workType.includes('CEO'));
+  
+  // 💡 [수정] 근무제(CEO 등 포함) 필터링 없이 전체 사원 수집 적용
+  const targetMembers = Object.keys(masterMap);
+  
   const currentHour = new Date(nowMs).getUTCHours(); 
   const currentMinute = new Date(nowMs).getUTCMinutes();
   
@@ -627,15 +629,24 @@ async function main() {
         }
       }
 
-      let rawWorkType = emp.workType;
-      let workTypeKey = rawWorkType.includes('고정') ? 'FIXED' : (rawWorkType.includes('유연') ? 'FLEXIBLE' : 'PART_TIME');
+      // 💡 [수정] 사원마스터 시트의 근무제(CEO, 고정, 유연 등) 값을 기반으로 키 값 매핑
+      let rawWorkType = emp.workType || '고정';
+      let workTypeKey = 'PART_TIME';
+      if (rawWorkType.includes('고정')) workTypeKey = 'FIXED';
+      else if (rawWorkType.includes('유연')) workTypeKey = 'FLEXIBLE';
+      else if (rawWorkType.toUpperCase().includes('CEO') || rawWorkType.includes('자율') || rawWorkType.includes('임원')) workTypeKey = 'FREE';
+
       let allText = msgs.map(m => m.text.replace(/\n/g, ' ')).join(' | ');
       let leaveStatus = extractLeaveStatus(allText);
 
       if (msgs.length === 0) {
         if (!row) {
           if (date === todayStr && currentHour < 23) continue;
-          let status = '결근', note = '평일 (미보고)';
+          
+          // 💡 [수정] FREE(자율/CEO) 근무자는 미보고 시 결근이 아닌 정상/자율근무로 표시
+          let status = workTypeKey === 'FREE' ? '정상' : '결근';
+          let note = workTypeKey === 'FREE' ? '자율근무 (미보고)' : '평일 (미보고)';
+          
           if (holidayName) { status = '휴무'; note = `공휴일(${holidayName})`; }
           else if (isWeekend) { status = '휴무'; note = `주말(${dayName})`; }
           let autoLeaveType = status === '결근' ? getLeaveTypeByTenure(userJoinDate, date) : '-';
@@ -675,7 +686,7 @@ async function main() {
         allText = '[자동반차판정] ' + allText;
       }
 
-      // 💡 2. 신규 추가 로직: 퇴근이 13:30 ~ 15:30 사이일 경우 '오후반차'로 자동 판정
+      // 2. 신규 추가 로직: 퇴근이 13:30 ~ 15:30 사이일 경우 '오후반차'로 자동 판정
       if (!leaveStatus && endMin !== null && endMin >= 13 * 60 + 30 && endMin <= 15 * 60 + 30) {
         leaveStatus = '오후반차';
         allText = '[자동반차판정] ' + allText;
@@ -705,9 +716,11 @@ async function main() {
       let autoLeaveType = ['연차', '월차', '반차', '오전반차', '오후반차', '휴가'].includes(status) ? getLeaveTypeByTenure(userJoinDate, date) : '-';
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
       
+      // 💡 [수정] 지각/야근 판별 시 CEO/자율근무는 지각 처리 없이 정상 통과되도록 매핑 적용
       if (!['연차', '월차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
         if (workTypeKey === 'FIXED') analysis = analyzeFixed(latenessCheckMin, endMin);
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(latenessCheckMin, endMin);
+        else if (workTypeKey === 'FREE') analysis = { lateness: '정상', overtime: '없음', overtimeHours: 0 };
         else analysis = analyzePartTime(latenessCheckMin, endMin);
 
         if (leaveStatus === '오전반차' || leaveStatus === '반차') {
@@ -717,7 +730,7 @@ async function main() {
         }
       }
 
-if (!row) {
+      if (!row) {
         const newRow = [
           date, dayName, member, rawWorkType, status, analysis.lateness, 
           formatTimeFromMins(startMin), formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin), formatTimeFromMins(endMin), 
@@ -752,7 +765,6 @@ if (!row) {
       for (let i = 1; i < currentExistingRows.length; i++) {
         const row = currentExistingRows[i];
 
-        // 💡 핵심 수정 3: 시트에 Insert 되기 전인 메모리 상의 새 행은 소급 업데이트 대상에서 제외 (인덱스 꼬임 원천 차단)
         if (row._isNew) continue; 
 
         if (row[12] && (
@@ -809,7 +821,6 @@ if (!row) {
       }
     }
 
-    // 🟢 [추가] 풀 스위퍼 처리가 끝난 후 새로운 해시값을 '시스템설정' 시트에 업데이트
     if (hashRowIndex > 0) {
       await sheets.sheets.spreadsheets.values.update({
         spreadsheetId: sheets.sheetId,
@@ -826,12 +837,12 @@ if (!row) {
         requestBody: { values: [['MASTER_HASH', currentHash, '사원/캘린더 변경 감지용 해시(건드리지 마세요)']] }
       });
     }
-  } // 👈 if (needsFullReconcile) 닫힘
+  }
 
   // =========================================================================
   // 3단계: 구글 시트 일괄 API 요청 (Batch Update & Append)
   // =========================================================================
-for (const year of targetYears) {
+  for (const year of targetYears) {
     const sName = sheetData[year].sheetName;
     const appends = toAppendByYear[year];
     const updates = toUpdateByYear[year];
@@ -840,7 +851,7 @@ for (const year of targetYears) {
       await sheets.sheets.spreadsheets.values.append({ 
         spreadsheetId: sheets.sheetId, 
         range: `'${sName}'!A:M`, 
-        valueInputOption: 'USER_ENTERED', // 💡 RAW에서 USER_ENTERED로 변경
+        valueInputOption: 'USER_ENTERED', 
         insertDataOption: 'INSERT_ROWS', 
         requestBody: { values: appends } 
       });
@@ -849,7 +860,7 @@ for (const year of targetYears) {
       await sheets.sheets.spreadsheets.values.batchUpdate({ 
         spreadsheetId: sheets.sheetId, 
         requestBody: { 
-          valueInputOption: 'USER_ENTERED', // 💡 RAW에서 USER_ENTERED로 변경
+          valueInputOption: 'USER_ENTERED', 
           data: updates 
         } 
       });
@@ -865,7 +876,7 @@ for (const year of targetYears) {
     for (const dm of dmQueue) {
       try { 
         await slack.call('chat.postMessage', { channel: dm.userId, text: dm.text }); 
-        await new Promise(res => setTimeout(res, 300)); // 기존 코드의 resolve 오류 수정
+        await new Promise(res => setTimeout(res, 300)); 
       } catch (err) {}
     }
   }
