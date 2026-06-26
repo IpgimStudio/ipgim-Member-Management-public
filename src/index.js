@@ -36,25 +36,26 @@ function formatTimeFromMins(totalMinutes) {
   const m = totalMinutes % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
+
 function getDateFromTs(ts) {
   const kst = new Date(parseFloat(ts) * 1000 + 9 * 60 * 60 * 1000);
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
 }
+
 function getYesterdayDateStr(dateStr) {
   const d = new Date(dateStr);
   d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
 function getKstObj(ts) {
   return new Date(parseFloat(ts) * 1000 + 9 * 60 * 60 * 1000);
 }
+
 function normalizeSheetDate(val) {
   if (!val) return '';
   let strVal = String(val).trim();
-
-  if (strVal.startsWith("'")) {
-    strVal = strVal.slice(1);
-  }
+  if (strVal.startsWith("'")) strVal = strVal.slice(1);
 
   if (/^\d{5}$/.test(strVal)) {
     const excelEpoch = new Date(Date.UTC(1899, 11, 30));
@@ -65,6 +66,7 @@ function normalizeSheetDate(val) {
   if (clean.endsWith('-')) clean = clean.slice(0, -1);
   return clean.length === 10 ? clean : strVal;
 }
+
 function normalizeSheetTime(val) {
   if (!val || val === '-') return '-';
   const strVal = String(val).trim();
@@ -74,6 +76,7 @@ function normalizeSheetTime(val) {
   }
   return strVal;
 }
+
 function getLeaveTypeByTenure(joinDateStr, currentDateStr) {
   if (!joinDateStr || !currentDateStr) return '-';
   try {
@@ -84,21 +87,22 @@ function getLeaveTypeByTenure(joinDateStr, currentDateStr) {
     return current >= oneYearLater ? '연차' : '월차';
   } catch (e) { return '-'; }
 }
+
 function cleanUserName(rawName) {
   if (!rawName) return '알 수 없음';
   return rawName.replace(/\s*[\(\[\{<].*?[\)\]\}>]\s*/g, '').trim();
 }
+
 function snapToNearestHour(minutes) {
   return Math.round(minutes / 60) * 60;
 }
+
 function extractTimeFromText(text, ts, isMidnightShift = false) {
   const times = [];
   const kstObj = getKstObj(ts);
   let baseMinutes = kstObj.getUTCHours() * 60 + kstObj.getUTCMinutes();
   
-  if (isMidnightShift) {
-    baseMinutes += 24 * 60;
-  }
+  if (isMidnightShift) baseMinutes += 24 * 60;
   times.push(baseMinutes); 
 
   if (text.includes('출근') || text.includes('입실')) {
@@ -116,16 +120,16 @@ function extractTimeFromText(text, ts, isMidnightShift = false) {
   }
   return times;
 }
+
+// 💡 [핵심 복구] 덕담/인사말 무시 & 휴가 상태 스캔 함수
 function extractLeaveStatus(text) {
-  let cleanText = text.replace(/(내일|익일|모레|다음주|차주|다음 주|월요일|화요일|수요일|목요일|금요일)[^.!|\n]*(휴가|연차|월차|반차|조퇴|결근|예비군|민방위)/g, '');
-  cleanText = cleanText.replace(/(휴가|연차|월차|반차|조퇴|결근|예비군|민방위)[^.!|\n]*(예정|계획)/g, '');
-  cleanText = cleanText.replace(/(즐거|행복|좋은|잘|건강|풀|풀충전)[^.!|\n]*(명절|추석|연휴|휴가|주말)/g, '');
-  cleanText = cleanText.replace(/(명절|추석|연휴|휴가|주말)[^.!|\n]*(보내|되|쉬|다녀|만나|뵙|충전)/g, '');
+  // 타인의 휴가에 달아주는 인사말("휴가 잘 다녀오세요", "즐거운 연차 되세요" 등) 필터링
+  let cleanText = text.replace(/(즐거|행복|좋은|잘|건강|풀|풀충전|무사히)[^.!|\n]*(명절|추석|연휴|휴가|주말|연차|반차)/g, '');
+  cleanText = cleanText.replace(/(명절|추석|연휴|휴가|주말|연차|반차)[^.!|\n]*(보내|되|쉬|다녀|만나|뵙|충전)/g, '');
 
   if (cleanText.includes('오전반차') || cleanText.includes('오전 반차')) return '오전반차';
   if (cleanText.includes('오후반차') || cleanText.includes('오후 반차')) return '오후반차';
   if (cleanText.includes('반차')) return '반차';
-  
   if (cleanText.includes('연차')) return '연차';
   if (cleanText.includes('월차')) return '월차'; 
   if (cleanText.includes('휴가') || cleanText.includes('명절') || cleanText.includes('추석') || cleanText.includes('연휴')) return '휴가';
@@ -135,6 +139,7 @@ function extractLeaveStatus(text) {
   if (cleanText.includes('민방위')) return '민방위';
   return '';
 }
+
 function analyzeFixed(startMin, endMin) {
   const workStart = 9 * 60; 
   const workEnd = 18 * 60; 
@@ -155,6 +160,7 @@ function analyzeFixed(startMin, endMin) {
   }
   return { lateness, overtime, overtimeHours };
 }
+
 function analyzeFlexible(startMin, endMin) {
   const minStart = 8 * 60; 
   const maxStartLimit = 11 * 60; 
@@ -174,6 +180,7 @@ function analyzeFlexible(startMin, endMin) {
   }
   return { lateness, overtime, overtimeHours };
 }
+
 function analyzePartTime(startMin, endMin) {
   const workStart = 9 * 60;
   const workEnd = 12 * 60;
@@ -319,7 +326,7 @@ class SheetsClient {
 
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v22.0 (초강력 풀 스위퍼 - 서버리스 해시 감지 탑재)');
+  console.log('  Slack 출퇴근 스마트 로거 v24.0 (미래 예약 및 인사말 필터링 복구본)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -329,7 +336,6 @@ async function main() {
 
   const holidaysMap = await sheets.getHolidays();
   const slack = new SlackClient(CONFIG.slack.token);
-  const botUserId = await slack.getBotUserId();
   const userMap = await slack.getUsers();
   
   const nameToSlackId = {};
@@ -352,7 +358,6 @@ async function main() {
   }
 
   const masterMap = await sheets.getEmployeeMaster();
-
   const currentMasterData = JSON.stringify(masterMap) + JSON.stringify(holidaysMap);
   const currentHash = crypto.createHash('sha256').update(currentMasterData).digest('hex');
 
@@ -464,32 +469,35 @@ async function main() {
     let targetDateStr = dateStr;
     let isMidnightShift = false;
 
-    if (hour >= 0 && hour < 5 && isClockOutMsg && !text.includes('출근정정')) {
+    // 새벽 퇴근 처리 (0시 ~ 5시)
+    if (hour >= 0 && hour < 5 && isClockOutMsg) {
       targetDateStr = getYesterdayDateStr(dateStr);
       isMidnightShift = true;
     }
 
-    const dateMatch = text.match(/\[퇴근정정\]\s*(?:(\d{4})[-./])?(\d{1,2})[-./](\d{1,2})\s+(\d{1,2})[:시]\s*(\d{1,2})?/);
-    const timeMatch = text.match(/\[퇴근정정\]\s*(\d{1,2})[:시]\s*(\d{1,2})?/);
+    // 💡 [핵심 복구] 미래 날짜(내일, 모레, 특정일) 사전 휴가 예약 파싱
+    if (/(연차|월차|반차|오전반차|오후반차|휴가|결근|조퇴|예비군|민방위)/.test(text)) {
+      const tomorrowMatch = text.match(/(내일|익일)/);
+      const dayAfterMatch = text.match(/(모레)/);
+      const specificDateMatch = text.match(/(?:(\d{4})년\s*)?(\d{1,2})월\s*(\d{1,2})일/);
+      const specificDateMatch2 = text.match(/(\d{1,2})[-/](\d{1,2})/);
 
-    if (dateMatch) {
-      const year = dateMatch[1] || new Date(parseFloat(msg.ts) * 1000 + 9 * 60 * 60 * 1000).getFullYear();
-      targetDateStr = `${year}-${String(dateMatch[2]).padStart(2, '0')}-${String(dateMatch[3]).padStart(2, '0')}`;
-      msg.isCorrection = true;
-      let hr = parseInt(dateMatch[4], 10);
-      msg.correctionTime = hr * 60 + (dateMatch[5] ? parseInt(dateMatch[5], 10) : 0);
-      if (hr < 5) msg.correctionTime += 24 * 60; 
-    } else if (timeMatch) {
-      msg.isCorrection = true;
-      let hr = parseInt(timeMatch[1], 10);
-      msg.correctionTime = hr * 60 + (timeMatch[2] ? parseInt(timeMatch[2], 10) : 0);
-      if (hr < 5 && (hour >= 0 && hour < 6)) hr += 24; 
-      else if (hr < 5) hr += 24; 
-      msg.correctionTime = hr * 60 + (timeMatch[2] ? parseInt(timeMatch[2], 10) : 0);
+      if (specificDateMatch) {
+        const y = specificDateMatch[1] || currentYear;
+        targetDateStr = `${y}-${String(specificDateMatch[2]).padStart(2, '0')}-${String(specificDateMatch[3]).padStart(2, '0')}`;
+      } else if (specificDateMatch2) {
+        targetDateStr = `${currentYear}-${String(specificDateMatch2[1]).padStart(2, '0')}-${String(specificDateMatch2[2]).padStart(2, '0')}`;
+      } else if (tomorrowMatch) {
+        const t = new Date(kstObj.getTime() + 24 * 60 * 60 * 1000);
+        targetDateStr = `${t.getUTCFullYear()}-${String(t.getUTCMonth()+1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+      } else if (dayAfterMatch) {
+        const t = new Date(kstObj.getTime() + 48 * 60 * 60 * 1000);
+        targetDateStr = `${t.getUTCFullYear()}-${String(t.getUTCMonth()+1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+      }
     }
 
     if (!lastActiveDate[userName] || targetDateStr > lastActiveDate[userName]) {
-      if (!text.includes('결근') && !text.includes('연차')) lastActiveDate[userName] = targetDateStr;
+      lastActiveDate[userName] = targetDateStr;
     }
 
     msg.isMidnightShift = isMidnightShift;
@@ -508,10 +516,16 @@ async function main() {
   for (let d = new Date(minDateStr); d <= new Date(todayStr); d.setDate(d.getDate() + 1)) {
     allDays.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
   }
+  
+  // 미래 예약 건수들도 allDays 배열에 포함시키기 위해 groupedMsgs의 키(날짜)를 전부 확인하여 추가합니다.
+  for (const futureDate of Object.keys(groupedMsgs)) {
+    if (futureDate > todayStr && !allDays.includes(futureDate)) {
+      allDays.push(futureDate);
+    }
+  }
 
   const dmQueue = [];
   const targetMembers = Object.keys(masterMap);
-  
   const currentHour = new Date(nowMs).getUTCHours(); 
   const currentMinute = new Date(nowMs).getUTCMinutes();
   
@@ -525,9 +539,7 @@ async function main() {
 
   for (const member of targetMembers) {
     const emp = masterMap[member];
-    if (emp.note && emp.note.includes('[수동관리]')) {
-      continue; 
-    }
+    if (emp.note && emp.note.includes('[수동관리]')) continue; 
     let isAlreadyResigned = (emp.status === '퇴사' || emp.status === '퇴사자');
     let needsLeaveDate = isAlreadyResigned && !emp.leaveDate;
 
@@ -545,9 +557,7 @@ async function main() {
       if (!isResigned && !isAlreadyResigned) {
         const lastMsgObj = new Date(lastMsgDateStr);
         const diffDays = Math.floor((todayObj - lastMsgObj) / (1000 * 60 * 60 * 24));
-        if (diffDays >= 14) {
-          isResigned = true;
-        }
+        if (diffDays >= 14) isResigned = true;
       }
 
       if (isResigned || needsLeaveDate) {
@@ -573,10 +583,9 @@ async function main() {
       spreadsheetId: sheets.sheetId, 
       requestBody: { valueInputOption: 'USER_ENTERED', data: masterUpdates } 
     });
-    console.log(`[안내] 사원마스터 시트에 ${masterUpdates.length}명의 자동 퇴사 처리가 반영되었습니다.`);
   }
 
-  for (const date of allDays) {
+  for (const date of allDays.sort()) { // 시간 순 정렬
     if (!isInitialRun && date < limitDateStr) continue;
 
     const dObj = new Date(date);
@@ -594,7 +603,7 @@ async function main() {
     for (const member of targetMembers) {
       const emp = masterMap[member];
       const userJoinDate = firstActiveDate[member] || emp.joinDate;
-      if (date < userJoinDate) continue;
+      if (date < userJoinDate && date <= todayStr) continue; // 입사일 이전 데이터 스킵 (미래 날짜는 허용)
 
       const msgs = groupedMsgs[date]?.[member] || [];
       const rowIdx = currentExistingRows.findIndex(r => r && r[0] === date && (r[2] || '').trim() === member); 
@@ -603,7 +612,8 @@ async function main() {
       if (row && row[12] && (
           row[12].includes('[슬랙수정]') || 
           row[12].includes('[슬랙신규]') || 
-          row[12].includes('[관리자정정]')
+          row[12].includes('[관리자정정]') ||
+          row[12].includes('[정정완료]')
       )) {
         continue;
       }
@@ -625,11 +635,12 @@ async function main() {
       else if (rawWorkType.toUpperCase().includes('CEO') || rawWorkType.includes('자율') || rawWorkType.includes('임원')) workTypeKey = 'FREE';
 
       let allText = msgs.map(m => m.text.replace(/\n/g, ' ')).join(' | ');
-      let leaveStatus = extractLeaveStatus(allText);
+      let leaveStatus = extractLeaveStatus(allText); // 💡 [핵심 복구] 휴가 종류 스캔 로직 부활
 
       if (msgs.length === 0) {
         if (!row) {
           if (date === todayStr && currentHour < 23) continue;
+          if (date > todayStr) continue; // 텍스트가 없는 미래 날짜는 생성 안 함
           
           let status = workTypeKey === 'FREE' ? '정상' : '결근';
           let note = workTypeKey === 'FREE' ? '자율근무 (미보고)' : '평일 (미보고)';
@@ -638,58 +649,55 @@ async function main() {
           else if (isWeekend) { status = '휴무'; note = `주말(${dayName})`; }
           let autoLeaveType = status === '결근' ? getLeaveTypeByTenure(userJoinDate, date) : '-';
           
-          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '-', '0', leaveStatus || autoLeaveType, note];
+          const newRow = [date, dayName, member, rawWorkType, status, '-', '-', '-', '-', '-', '0', autoLeaveType, note];
           toAppendByYear[yyyy].push(newRow); 
           currentExistingRows.push(newRow);
         }
         continue;
       }
+      
       let times = []; 
-      let forcedEndMin = null;
       let actualStartMin = null; 
       let manualStartMin = null; 
 
       for (const m of msgs) {
-        if (m.isCorrection) {
-          forcedEndMin = m.correctionTime;
-        } else {
-          const extracted = extractTimeFromText(m.text, m.ts, m.isMidnightShift);
-          times.push(...extracted);
-          
-          if (actualStartMin === null) {
-            const kst = getKstObj(m.ts);
-            actualStartMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
-          }
-          
-          if (extracted.length > 1 && manualStartMin === null) {
-            manualStartMin = extracted[1];
-          }
+        const extracted = extractTimeFromText(m.text, m.ts, m.isMidnightShift);
+        times.push(...extracted);
+        
+        if (actualStartMin === null) {
+          const kst = getKstObj(m.ts);
+          actualStartMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+        }
+        if (extracted.length > 1 && manualStartMin === null) {
+          manualStartMin = extracted[1];
         }
       }
 
       times.sort((a, b) => a - b);
                   
-      const rawStartMin = times[0];
-      let endMin = forcedEndMin !== null ? forcedEndMin : (times.length > 1 ? times[times.length - 1] : null);
-      const startMin = snapToNearestHour(rawStartMin);
+      const rawStartMin = times[0] || null;
+      let endMin = times.length > 1 ? times[times.length - 1] : null;
+      let startMin = rawStartMin !== null ? snapToNearestHour(rawStartMin) : null;
 
-      if (typeof manualStartMin !== 'undefined' && manualStartMin !== null) {
-        actualStartMin = manualStartMin;
+      if (typeof manualStartMin !== 'undefined' && manualStartMin !== null) actualStartMin = manualStartMin;
+      let latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
+
+      // 💡 [핵심 추가] 9시 이전 조기 출근 보정
+      if (startMin !== null && (workTypeKey === 'FIXED' || workTypeKey === 'PART_TIME' || workTypeKey === 'FLEXIBLE')) {
+        const NINE_AM = 9 * 60;
+        if (startMin < NINE_AM) startMin = NINE_AM;
+        if (latenessCheckMin < NINE_AM) latenessCheckMin = NINE_AM;
       }
-      const latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
 
-      const hasClockOutKeyword = allText.includes('퇴근') || allText.includes('퇴실') || forcedEndMin !== null;
+      const hasClockOutKeyword = allText.includes('퇴근') || allText.includes('퇴실');
       if (!hasClockOutKeyword && endMin !== null) {
-        if (endMin - rawStartMin < 4 * 60) {
-          endMin = null; 
-        }
+        if (endMin - rawStartMin < 4 * 60) endMin = null; 
       }
 
-      if (!leaveStatus && latenessCheckMin >= 13 * 60 + 30 && latenessCheckMin <= 14 * 60 + 30) {
+      if (!leaveStatus && latenessCheckMin !== null && latenessCheckMin >= 13 * 60 + 30 && latenessCheckMin <= 14 * 60 + 30) {
         leaveStatus = '오전반차';
         allText = '[자동반차판정] ' + allText;
       }
-
       if (!leaveStatus && endMin !== null && endMin >= 13 * 60 + 30 && endMin <= 15 * 60 + 30) {
         leaveStatus = '오후반차';
         allText = '[자동반차판정] ' + allText;
@@ -699,7 +707,7 @@ async function main() {
       if (holidayName || isWeekend) { status = '휴일근무'; note = `[${holidayName ? holidayName : dayName}] ` + allText; }
       
       const hasClockIn = allText.includes('출근') || allText.includes('입실') || times.length > 0;
-      const hasClockOut = allText.includes('퇴근') || allText.includes('퇴실') || forcedEndMin !== null;
+      const hasClockOut = allText.includes('퇴근') || allText.includes('퇴실');
       const hasClockInAndOut = (hasClockIn && hasClockOut) || (endMin !== null && endMin - rawStartMin >= 4 * 60);
 
       if (hasClockInAndOut) {
@@ -712,23 +720,21 @@ async function main() {
       if (date === todayStr && currentHour === 23 && currentMinute >= 50 && currentMinute <= 52 && hasClockIn && !hasClockOut && status !== '단순메시지') {
         const slackId = nameToSlackId[member];
         if (slackId) {
-          dmQueue.push({ userId: slackId, text: `안녕하세요 ${member}님! 오늘 출근 보고는 확인되었으나 아직 퇴근 보고가 누락된 상태입니다. 야근으로 인해 늦어지셨거나 깜빡하셨다면 근태 채널에 아래 양식으로 수정 메시지를 남겨주세요!\n\n*당일 퇴근 정정 예시:* \`[퇴근정정] 18:30\`\n*새벽 야근 정정 예시(새벽 1시 퇴근 시):* \`[퇴근정정] 25:00\` 또는 \`[퇴근정정] 01:00\`` });
+          dmQueue.push({ userId: slackId, text: `안녕하세요 ${member}님! 오늘 출근 보고는 확인되었으나 아직 퇴근 보고가 누락된 상태입니다. 야근으로 인해 늦어지셨거나 깜빡하셨다면 채팅창에 \`/근태정정\` 명령어를 입력하여 퇴근 시간을 갱신해 주세요!` });
         }
       }
 
       let autoLeaveType = ['연차', '월차', '반차', '오전반차', '오후반차', '휴가'].includes(status) ? getLeaveTypeByTenure(userJoinDate, date) : '-';
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
       
-      if (!['연차', '월차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
+      if (!['연차', '월차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status) && startMin !== null) {
         if (workTypeKey === 'FIXED') analysis = analyzeFixed(latenessCheckMin, endMin);
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(latenessCheckMin, endMin);
         else if (workTypeKey === 'FREE') analysis = { lateness: '정상', overtime: '없음', overtimeHours: 0 };
         else analysis = analyzePartTime(latenessCheckMin, endMin);
 
         if (leaveStatus === '오전반차' || leaveStatus === '반차') {
-          if (latenessCheckMin <= 14 * 60 + 10) {
-            analysis.lateness = '정상';
-          }
+          if (latenessCheckMin <= 14 * 60 + 10) analysis.lateness = '정상';
         }
       }
 
@@ -738,9 +744,7 @@ async function main() {
           formatTimeFromMins(startMin), formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin), formatTimeFromMins(endMin), 
           analysis.overtime, String(analysis.overtimeHours), leaveStatus || autoLeaveType, note
         ];
-        
         newRow._isNew = true; 
-
         toAppendByYear[yyyy].push(newRow); 
         currentExistingRows.push(newRow);
       } else {
@@ -750,7 +754,6 @@ async function main() {
         row[7] = formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin); 
         row[8] = formatTimeFromMins(endMin);
         row[9] = analysis.overtime; row[10] = String(analysis.overtimeHours); row[11] = leaveStatus || autoLeaveType; row[12] = note;
-        
         toUpdateByYear[yyyy].push({ range: `'${currentSheetName}'!B${rowIdx + 1}:M${rowIdx + 1}`, values: [row.slice(1, 13)] });
       }
     }
@@ -765,14 +768,12 @@ async function main() {
         const row = currentExistingRows[i];
 
         if (row._isNew) continue; 
-
         if (row[12] && (
             row[12].includes('[슬랙수정]') || 
             row[12].includes('[슬랙신규]') || 
-            row[12].includes('[관리자정정]')
-        )) {
-          continue;
-        }
+            row[12].includes('[관리자정정]') ||
+            row[12].includes('[정정완료]')
+        )) continue;
 
         const date = row[0];
         const member = row[2];
@@ -833,7 +834,7 @@ async function main() {
         range: `'시스템설정'!A:C`,
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
-        requestBody: { values: [['MASTER_HASH', currentHash, '사원/캘린더 변경 감지용 해시(건드리지 마세요)']] }
+        requestBody: { values: [['MASTER_HASH', currentHash, '사원/캘린더 변경 감지용 해시']] }
       });
     }
   }
@@ -855,13 +856,9 @@ async function main() {
     if (updates.length > 0) {
       await sheets.sheets.spreadsheets.values.batchUpdate({ 
         spreadsheetId: sheets.sheetId, 
-        requestBody: { 
-          valueInputOption: 'USER_ENTERED', 
-          data: updates 
-        } 
+        requestBody: { valueInputOption: 'USER_ENTERED', data: updates } 
       });
     }
-    
     if (appends.length > 0 || updates.length > 0) {
       await sheets.sortSheet(sName);
     }
