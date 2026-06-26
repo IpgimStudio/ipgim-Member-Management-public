@@ -657,19 +657,25 @@ async function main() {
         }
         continue;
       }
-
       let times = []; 
       let forcedEndMin = null;
       let actualStartMin = null; 
+      let manualStartMin = null; 
 
       for (const m of msgs) {
         if (m.isCorrection) {
           forcedEndMin = m.correctionTime;
         } else {
-          times.push(...extractTimeFromText(m.text, m.ts, m.isMidnightShift));
+          const extracted = extractTimeFromText(m.text, m.ts, m.isMidnightShift);
+          times.push(...extracted);
+          
           if (actualStartMin === null) {
             const kst = getKstObj(m.ts);
             actualStartMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+          }
+          
+          if (extracted.length > 1 && manualStartMin === null) {
+            manualStartMin = extracted[1];
           }
         }
       }
@@ -678,6 +684,10 @@ async function main() {
       const rawStartMin = times[0];
       let endMin = forcedEndMin !== null ? forcedEndMin : (times.length > 1 ? times[times.length - 1] : null);
       const startMin = snapToNearestHour(rawStartMin);
+      
+      if (manualStartMin !== null) {
+        actualStartMin = manualStartMin;
+      }
       const latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
 
       // 1. 기존 로직: 출근이 13:30 ~ 14:30 사이일 경우 '오전반차'로 자동 판정
