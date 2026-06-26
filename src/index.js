@@ -689,15 +689,35 @@ async function main() {
       const rawStartMin = inTimes.length > 0 ? inTimes[0] : null;
       let endMin = outTimes.length > 0 ? outTimes[outTimes.length - 1] : null;
       
-      // 둘 다 출근 배열에 들어갔을 경우를 대비한 2차 퇴근시간 추출 (안전장치)
+// 둘 다 출근 배열에 들어갔을 경우를 대비한 2차 퇴근시간 추출 (안전장치)
       if (endMin === null && inTimes.length > 1) {
         endMin = inTimes[inTimes.length - 1];
       }
 
-      let startMin = rawStartMin !== null ? snapToNearestHour(rawStartMin) : null;
+      // 💡 [핵심 수정 1] 근무제별 '인정 출근 시간(근무 시작 시간)' 분리 산정 로직
+      let startMin = null;
+      if (rawStartMin !== null) {
+        if (workTypeKey === 'FLEXIBLE') {
+          // 유연근무제: 타각 시간이 매 시각 10분 이내면 내림(해당 시), 10분 초과면 올림(다음 시)
+          const rem = rawStartMin % 60;
+          if (rem <= 10) {
+            startMin = Math.floor(rawStartMin / 60) * 60;
+          } else {
+            startMin = Math.ceil(rawStartMin / 60) * 60;
+          }
+        } else {
+          // 고정/아르바이트: 기존 로직 유지 (가장 가까운 정각)
+          startMin = snapToNearestHour(rawStartMin);
+        }
+      }
 
       if (typeof manualStartMin !== 'undefined' && manualStartMin !== null) actualStartMin = manualStartMin;
+      
+      // 💡 [핵심 수정 2] 지각 판정 기준 시간 (FLEXIBLE은 보정된 정각 기준, FIXED는 실제 분 단위 기준)
       let latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
+      if (workTypeKey === 'FLEXIBLE' && startMin !== null) {
+        latenessCheckMin = startMin; // 유연근무제는 10분 단위로 올림/내림된 최종 기준 시간을 지각 판정에 사용
+      }
 
       if (startMin !== null && (workTypeKey === 'FIXED' || workTypeKey === 'PART_TIME' || workTypeKey === 'FLEXIBLE')) {
         const NINE_AM = 9 * 60;
