@@ -5,7 +5,6 @@ import { google } from 'googleapis';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
 
-// ─────────────────── 환경설정 ───────────────────
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = path.resolve(__dirname, './config.json');
 let CONFIG = {};
@@ -31,7 +30,6 @@ if (!CONFIG.sheets.sheetNames) {
 }
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
-// ─────────────────── 유틸리티 및 분석 엔진 ───────────────────
 function formatTimeFromMins(totalMinutes) {
   if (totalMinutes === undefined || totalMinutes === null) return '-';
   const h = Math.floor(totalMinutes / 60);
@@ -197,7 +195,6 @@ function analyzePartTime(startMin, endMin) {
   return { lateness, overtime, overtimeHours };
 }
 
-// ─────────────────── Slack / Sheets 클라이언트 ───────────────────
 class SlackClient {
   constructor(token) { this.token = token; }
   async call(method, params = {}) {
@@ -320,7 +317,6 @@ class SheetsClient {
   }
 }
 
-// ─────────────────── 메인 로직 ───────────────────
 async function main() {
   console.log('========================================');
   console.log('  Slack 출퇴근 스마트 로거 v22.0 (초강력 풀 스위퍼 - 서버리스 해시 감지 탑재)');
@@ -357,7 +353,6 @@ async function main() {
 
   const masterMap = await sheets.getEmployeeMaster();
 
-  // 마스터 데이터 해시(Hash) 생성 및 비교 로직 ──────────────────
   const currentMasterData = JSON.stringify(masterMap) + JSON.stringify(holidaysMap);
   const currentHash = crypto.createHash('sha256').update(currentMasterData).digest('hex');
 
@@ -381,7 +376,6 @@ async function main() {
   } else {
     console.log('✅ 마스터 데이터 변경 없음. 풀 스위퍼를 생략하고 최근 기록만 동기화합니다.');
   }
-  // ─────────────────────────────────────────────────────────────
 
   const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60;
   let oldest = isInitialRun ? '0' : String(Math.floor(Date.now() / 1000) - THIRTY_DAYS_SEC);
@@ -516,8 +510,6 @@ async function main() {
   }
 
   const dmQueue = [];
-  
-  // 💡 [수정] 근무제(CEO 등 포함) 필터링 없이 전체 사원 수집 적용
   const targetMembers = Object.keys(masterMap);
   
   const currentHour = new Date(nowMs).getUTCHours(); 
@@ -584,9 +576,6 @@ async function main() {
     console.log(`[안내] 사원마스터 시트에 ${masterUpdates.length}명의 자동 퇴사 처리가 반영되었습니다.`);
   }
 
-  // =========================================================================
-  // 1단계: 최근 30일(또는 초기) 슬랙 기반 동기화 루프
-  // =========================================================================
   for (const date of allDays) {
     if (!isInitialRun && date < limitDateStr) continue;
 
@@ -629,7 +618,6 @@ async function main() {
         }
       }
 
-      // 💡 [수정] 사원마스터 시트의 근무제(CEO, 고정, 유연 등) 값을 기반으로 키 값 매핑
       let rawWorkType = emp.workType || '고정';
       let workTypeKey = 'PART_TIME';
       if (rawWorkType.includes('고정')) workTypeKey = 'FIXED';
@@ -643,7 +631,6 @@ async function main() {
         if (!row) {
           if (date === todayStr && currentHour < 23) continue;
           
-          // 💡 [수정] FREE(자율/CEO) 근무자는 미보고 시 결근이 아닌 정상/자율근무로 표시
           let status = workTypeKey === 'FREE' ? '정상' : '결근';
           let note = workTypeKey === 'FREE' ? '자율근무 (미보고)' : '평일 (미보고)';
           
@@ -679,34 +666,30 @@ async function main() {
           }
         }
       }
-      
+
       times.sort((a, b) => a - b);
                   
       const rawStartMin = times[0];
       let endMin = forcedEndMin !== null ? forcedEndMin : (times.length > 1 ? times[times.length - 1] : null);
       const startMin = snapToNearestHour(rawStartMin);
-      
-      // 💡 [버그 수정] 앞서 파싱한 수동 시간(manualStartMin) 로직이 있다면 여기서 실제출근시간 덮어쓰기 적용
+
       if (typeof manualStartMin !== 'undefined' && manualStartMin !== null) {
         actualStartMin = manualStartMin;
       }
       const latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
 
-      // 💡 [버그 수정] 퇴근 키워드 없이 출근 직후(4시간 이내)에 메시지를 여러 번 보낸 경우 퇴근시간으로 오인하는 현상 방지
       const hasClockOutKeyword = allText.includes('퇴근') || allText.includes('퇴실') || forcedEndMin !== null;
       if (!hasClockOutKeyword && endMin !== null) {
         if (endMin - rawStartMin < 4 * 60) {
-          endMin = null; // 4시간 이내의 추가 메시지는 퇴근으로 간주하지 않고 무시하여 빈칸(-) 처리
+          endMin = null; 
         }
       }
 
-      // 1. 기존 로직: 출근이 13:30 ~ 14:30 사이일 경우 '오전반차'로 자동 판정
       if (!leaveStatus && latenessCheckMin >= 13 * 60 + 30 && latenessCheckMin <= 14 * 60 + 30) {
         leaveStatus = '오전반차';
         allText = '[자동반차판정] ' + allText;
       }
 
-      // 2. 신규 추가 로직: 퇴근이 13:30 ~ 15:30 사이일 경우 '오후반차'로 자동 판정
       if (!leaveStatus && endMin !== null && endMin >= 13 * 60 + 30 && endMin <= 15 * 60 + 30) {
         leaveStatus = '오후반차';
         allText = '[자동반차판정] ' + allText;
@@ -736,7 +719,6 @@ async function main() {
       let autoLeaveType = ['연차', '월차', '반차', '오전반차', '오후반차', '휴가'].includes(status) ? getLeaveTypeByTenure(userJoinDate, date) : '-';
       let analysis = { lateness: '-', overtime: '-', overtimeHours: 0 };
       
-      // 💡 [수정] 지각/야근 판별 시 CEO/자율근무는 지각 처리 없이 정상 통과되도록 매핑 적용
       if (!['연차', '월차', '휴가', '결근', '예비군', '민방위', '단순메시지'].includes(status)) {
         if (workTypeKey === 'FIXED') analysis = analyzeFixed(latenessCheckMin, endMin);
         else if (workTypeKey === 'FLEXIBLE') analysis = analyzeFlexible(latenessCheckMin, endMin);
@@ -774,9 +756,6 @@ async function main() {
     }
   }
 
-  // ==========================================================================
-  // 2단계: [새로운 엔진] 모든 연도의 과거 기록 수동 변경 소급 적용 (Full Sweeper)
-  // =========================================================================
   if (needsFullReconcile) {
     for (const year of targetYears) {
       const currentExistingRows = sheetData[year].existingRows;
@@ -859,9 +838,6 @@ async function main() {
     }
   }
 
-  // =========================================================================
-  // 3단계: 구글 시트 일괄 API 요청 (Batch Update & Append)
-  // =========================================================================
   for (const year of targetYears) {
     const sName = sheetData[year].sheetName;
     const appends = toAppendByYear[year];
@@ -891,7 +867,6 @@ async function main() {
     }
   }
 
-  // ─────────────────── Slack DM 발송 로직 ───────────────────
   if (dmQueue.length > 0) {
     for (const dm of dmQueue) {
       try { 
