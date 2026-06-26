@@ -679,16 +679,26 @@ async function main() {
           }
         }
       }
+      
       times.sort((a, b) => a - b);
-            
+                  
       const rawStartMin = times[0];
       let endMin = forcedEndMin !== null ? forcedEndMin : (times.length > 1 ? times[times.length - 1] : null);
       const startMin = snapToNearestHour(rawStartMin);
       
-      if (manualStartMin !== null) {
+      // 💡 [버그 수정] 앞서 파싱한 수동 시간(manualStartMin) 로직이 있다면 여기서 실제출근시간 덮어쓰기 적용
+      if (typeof manualStartMin !== 'undefined' && manualStartMin !== null) {
         actualStartMin = manualStartMin;
       }
       const latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
+
+      // 💡 [버그 수정] 퇴근 키워드 없이 출근 직후(4시간 이내)에 메시지를 여러 번 보낸 경우 퇴근시간으로 오인하는 현상 방지
+      const hasClockOutKeyword = allText.includes('퇴근') || allText.includes('퇴실') || forcedEndMin !== null;
+      if (!hasClockOutKeyword && endMin !== null) {
+        if (endMin - rawStartMin < 4 * 60) {
+          endMin = null; // 4시간 이내의 추가 메시지는 퇴근으로 간주하지 않고 무시하여 빈칸(-) 처리
+        }
+      }
 
       // 1. 기존 로직: 출근이 13:30 ~ 14:30 사이일 경우 '오전반차'로 자동 판정
       if (!leaveStatus && latenessCheckMin >= 13 * 60 + 30 && latenessCheckMin <= 14 * 60 + 30) {
