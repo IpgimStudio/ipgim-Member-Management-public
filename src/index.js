@@ -94,6 +94,7 @@ function cleanUserName(rawName) {
 }
 
 function snapToNearestHour(minutes) {
+  if (minutes === null) return null;
   return Math.round(minutes / 60) * 60;
 }
 
@@ -121,9 +122,7 @@ function extractTimeFromText(text, ts, isMidnightShift = false) {
   return times;
 }
 
-// 💡 [핵심 복구] 덕담/인사말 무시 & 휴가 상태 스캔 함수
 function extractLeaveStatus(text) {
-  // 타인의 휴가에 달아주는 인사말("휴가 잘 다녀오세요", "즐거운 연차 되세요" 등) 필터링
   let cleanText = text.replace(/(즐거|행복|좋은|잘|건강|풀|풀충전|무사히)[^.!|\n]*(명절|추석|연휴|휴가|주말|연차|반차)/g, '');
   cleanText = cleanText.replace(/(명절|추석|연휴|휴가|주말|연차|반차)[^.!|\n]*(보내|되|쉬|다녀|만나|뵙|충전)/g, '');
 
@@ -144,12 +143,12 @@ function analyzeFixed(startMin, endMin) {
   const workStart = 9 * 60; 
   const workEnd = 18 * 60; 
   let lateness = '정상';
-  if (startMin > workStart) {
+  if (startMin !== null && startMin > workStart) {
     lateness = startMin <= workStart + 10 ? '경미한 지각' : '지각';
   }
   let overtime = '없음';
   let overtimeHours = 0;
-  if (endMin > workEnd) {
+  if (endMin !== null && endMin > workEnd) {
     const diff = endMin - workEnd;
     if (diff <= 10) overtime = '없음'; 
     else if (diff <= 30) overtime = '경미한 연장'; 
@@ -164,12 +163,17 @@ function analyzeFixed(startMin, endMin) {
 function analyzeFlexible(startMin, endMin) {
   const minStart = 8 * 60; 
   const maxStartLimit = 11 * 60; 
-  let effectiveStart = startMin < minStart ? minStart : startMin; 
-  let lateness = startMin > maxStartLimit ? '지각' : '정상';
-  const targetEnd = effectiveStart + (9 * 60);
+  let lateness = '정상';
+  let targetEnd = 18 * 60; // fallback
+  if (startMin !== null) {
+    let effectiveStart = startMin < minStart ? minStart : startMin; 
+    lateness = startMin > maxStartLimit ? '지각' : '정상';
+    targetEnd = effectiveStart + (9 * 60);
+  }
+  
   let overtime = '없음';
   let overtimeHours = 0;
-  if (endMin > targetEnd) {
+  if (endMin !== null && endMin > targetEnd) {
     const diff = endMin - targetEnd;
     if (diff <= 10) overtime = '없음';
     else if (diff <= 30) overtime = '경미한 연장';
@@ -185,12 +189,12 @@ function analyzePartTime(startMin, endMin) {
   const workStart = 9 * 60;
   const workEnd = 12 * 60;
   let lateness = '정상';
-  if (startMin > workStart) {
+  if (startMin !== null && startMin > workStart) {
     lateness = startMin <= workStart + 10 ? '경미한 지각' : '지각';
   }
   let overtime = '없음';
   let overtimeHours = 0;
-  if (endMin > workEnd) {
+  if (endMin !== null && endMin > workEnd) {
     const diff = endMin - workEnd;
     if (diff <= 10) overtime = '없음';
     else if (diff <= 30) overtime = '경미한 연장';
@@ -326,7 +330,7 @@ class SheetsClient {
 
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v24.0 (미래 예약 및 인사말 필터링 복구본)');
+  console.log('  Slack 출퇴근 스마트 로거 v25.0 (출퇴근 시간 분리 파싱 최적화 탑재)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -469,13 +473,11 @@ async function main() {
     let targetDateStr = dateStr;
     let isMidnightShift = false;
 
-    // 새벽 퇴근 처리 (0시 ~ 5시)
     if (hour >= 0 && hour < 5 && isClockOutMsg) {
       targetDateStr = getYesterdayDateStr(dateStr);
       isMidnightShift = true;
     }
 
-    // 💡 [핵심 복구] 미래 날짜(내일, 모레, 특정일) 사전 휴가 예약 파싱
     if (/(연차|월차|반차|오전반차|오후반차|휴가|결근|조퇴|예비군|민방위)/.test(text)) {
       const tomorrowMatch = text.match(/(내일|익일)/);
       const dayAfterMatch = text.match(/(모레)/);
@@ -517,7 +519,6 @@ async function main() {
     allDays.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
   }
   
-  // 미래 예약 건수들도 allDays 배열에 포함시키기 위해 groupedMsgs의 키(날짜)를 전부 확인하여 추가합니다.
   for (const futureDate of Object.keys(groupedMsgs)) {
     if (futureDate > todayStr && !allDays.includes(futureDate)) {
       allDays.push(futureDate);
@@ -585,7 +586,7 @@ async function main() {
     });
   }
 
-  for (const date of allDays.sort()) { // 시간 순 정렬
+  for (const date of allDays.sort()) {
     if (!isInitialRun && date < limitDateStr) continue;
 
     const dObj = new Date(date);
@@ -603,7 +604,7 @@ async function main() {
     for (const member of targetMembers) {
       const emp = masterMap[member];
       const userJoinDate = firstActiveDate[member] || emp.joinDate;
-      if (date < userJoinDate && date <= todayStr) continue; // 입사일 이전 데이터 스킵 (미래 날짜는 허용)
+      if (date < userJoinDate && date <= todayStr) continue; 
 
       const msgs = groupedMsgs[date]?.[member] || [];
       const rowIdx = currentExistingRows.findIndex(r => r && r[0] === date && (r[2] || '').trim() === member); 
@@ -635,12 +636,12 @@ async function main() {
       else if (rawWorkType.toUpperCase().includes('CEO') || rawWorkType.includes('자율') || rawWorkType.includes('임원')) workTypeKey = 'FREE';
 
       let allText = msgs.map(m => m.text.replace(/\n/g, ' ')).join(' | ');
-      let leaveStatus = extractLeaveStatus(allText); // 💡 [핵심 복구] 휴가 종류 스캔 로직 부활
+      let leaveStatus = extractLeaveStatus(allText);
 
       if (msgs.length === 0) {
         if (!row) {
           if (date === todayStr && currentHour < 23) continue;
-          if (date > todayStr) continue; // 텍스트가 없는 미래 날짜는 생성 안 함
+          if (date > todayStr) continue; 
           
           let status = workTypeKey === 'FREE' ? '정상' : '결근';
           let note = workTypeKey === 'FREE' ? '자율근무 (미보고)' : '평일 (미보고)';
@@ -656,33 +657,48 @@ async function main() {
         continue;
       }
       
-      let times = []; 
+      let inTimes = []; 
+      let outTimes = [];
       let actualStartMin = null; 
       let manualStartMin = null; 
 
       for (const m of msgs) {
+        const text = m.text || '';
+        const isOutMsg = text.includes('퇴근') || text.includes('퇴실');
         const extracted = extractTimeFromText(m.text, m.ts, m.isMidnightShift);
-        times.push(...extracted);
         
-        if (actualStartMin === null) {
-          const kst = getKstObj(m.ts);
-          actualStartMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
-        }
-        if (extracted.length > 1 && manualStartMin === null) {
-          manualStartMin = extracted[1];
+        if (isOutMsg && !text.includes('출근')) {
+          // 💡 [핵심] 퇴근 메시지면 퇴근 배열에만 넣음 (출근 시간에 오염되지 않음)
+          outTimes.push(...extracted);
+        } else {
+          // 출근 메시지거나 모호한 경우 출근 배열에 넣음
+          inTimes.push(...extracted);
+          if (actualStartMin === null) {
+            const kst = getKstObj(m.ts);
+            actualStartMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+          }
+          if (extracted.length > 1 && manualStartMin === null) {
+            manualStartMin = extracted[1];
+          }
         }
       }
 
-      times.sort((a, b) => a - b);
+      inTimes.sort((a, b) => a - b);
+      outTimes.sort((a, b) => a - b);
                   
-      const rawStartMin = times[0] || null;
-      let endMin = times.length > 1 ? times[times.length - 1] : null;
+      const rawStartMin = inTimes.length > 0 ? inTimes[0] : null;
+      let endMin = outTimes.length > 0 ? outTimes[outTimes.length - 1] : null;
+      
+      // 둘 다 출근 배열에 들어갔을 경우를 대비한 2차 퇴근시간 추출 (안전장치)
+      if (endMin === null && inTimes.length > 1) {
+        endMin = inTimes[inTimes.length - 1];
+      }
+
       let startMin = rawStartMin !== null ? snapToNearestHour(rawStartMin) : null;
 
       if (typeof manualStartMin !== 'undefined' && manualStartMin !== null) actualStartMin = manualStartMin;
       let latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
 
-      // 💡 [핵심 추가] 9시 이전 조기 출근 보정
       if (startMin !== null && (workTypeKey === 'FIXED' || workTypeKey === 'PART_TIME' || workTypeKey === 'FLEXIBLE')) {
         const NINE_AM = 9 * 60;
         if (startMin < NINE_AM) startMin = NINE_AM;
@@ -690,7 +706,7 @@ async function main() {
       }
 
       const hasClockOutKeyword = allText.includes('퇴근') || allText.includes('퇴실');
-      if (!hasClockOutKeyword && endMin !== null) {
+      if (!hasClockOutKeyword && endMin !== null && rawStartMin !== null) {
         if (endMin - rawStartMin < 4 * 60) endMin = null; 
       }
 
@@ -706,9 +722,9 @@ async function main() {
       let status = '출근', note = allText;
       if (holidayName || isWeekend) { status = '휴일근무'; note = `[${holidayName ? holidayName : dayName}] ` + allText; }
       
-      const hasClockIn = allText.includes('출근') || allText.includes('입실') || times.length > 0;
+      const hasClockIn = allText.includes('출근') || allText.includes('입실') || inTimes.length > 0;
       const hasClockOut = allText.includes('퇴근') || allText.includes('퇴실');
-      const hasClockInAndOut = (hasClockIn && hasClockOut) || (endMin !== null && endMin - rawStartMin >= 4 * 60);
+      const hasClockInAndOut = (hasClockIn && hasClockOut) || (endMin !== null && rawStartMin !== null && endMin - rawStartMin >= 4 * 60);
 
       if (hasClockInAndOut) {
         if (['오전반차', '오후반차', '반차', '조퇴'].includes(leaveStatus)) status = leaveStatus;
