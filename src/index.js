@@ -411,6 +411,25 @@ async function main() {
   targetYearsSet.add(currentYear);
   const targetYears = Array.from(targetYearsSet).sort();
 
+
+  // 💡 [추가] 변동사항 시트 데이터를 로드하여 캐싱
+  const adjData = {}; 
+  if (!CONFIG.sheets.sheetNames.adjustments) CONFIG.sheets.sheetNames.adjustments = '변동사항';
+
+  for (const year of targetYears) {
+    const adjName = `${CONFIG.sheets.sheetNames.adjustments}_${year}`;
+    await sheets.ensureSheet(adjName, HEADERS);
+    
+    let aRows = await sheets.readAll(adjName);
+    const adjSet = new Set();
+    for (let i = 1; i < aRows.length; i++) {
+      if (aRows[i][0] && aRows[i][2]) {
+        adjSet.add(`${normalizeSheetDate(aRows[i][0])}_${aRows[i][2].trim()}`);
+      }
+    }
+    adjData[year] = adjSet;
+  }
+
   const sheetData = {}; 
   const toAppendByYear = {}; 
   const toUpdateByYear = {}; 
@@ -602,6 +621,10 @@ async function main() {
     const isWeekend = (dObj.getDay() === 0 || dObj.getDay() === 6);
 
     for (const member of targetMembers) {
+      if (adjData[yyyy] && adjData[yyyy].has(`${date}_${member}`)) {
+        continue;
+      }
+      
       const emp = masterMap[member];
       const userJoinDate = firstActiveDate[member] || emp.joinDate;
       if (date < userJoinDate && date <= todayStr) continue; 
