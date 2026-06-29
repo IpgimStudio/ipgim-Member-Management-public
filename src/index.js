@@ -837,8 +837,9 @@ async function main() {
         const date = row[0];
         const member = row[2];
 
-        if (!date || !member || (!isInitialRun && date >= limitDateStr)) continue;
+        if (adjData[year] && adjData[year].has(`${date}_${member}`)) continue;
 
+        if (!date || !member || (!isInitialRun && date >= limitDateStr)) continue;
         const emp = masterMap[member];
         if (!emp) continue;
 
