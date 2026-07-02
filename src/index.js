@@ -686,23 +686,39 @@ async function main() {
 
       for (const m of msgs) {
         const text = m.text || '';
-        const isOutMsg = text.includes('퇴근') || text.includes('퇴실');
-        const extracted = extractTimeFromText(m.text, m.ts, m.isMidnightShift);
-        
-        if (isOutMsg && !text.includes('출근')) {
-          outTimes.push(...extracted);
-        } else {
+        const hasOutKeyword = text.includes('퇴근') || text.includes('퇴실');
+        const hasInKeyword = text.includes('출근') || text.includes('입실');
+
+        // 1. 단순 대화 스킵: 출/퇴근 키워드가 없는 메시지는 시간 계산에서 완전히 제외
+        if (!hasInKeyword && !hasOutKeyword) continue;
+
+        const extracted = extractTimeFromText(text, m.ts, m.isMidnightShift);
+
+        // 2. 퇴근 처리: 퇴근 키워드가 있으면 메시지 발송 시간(extracted[0])을 퇴근 배열에 추가
+        if (hasOutKeyword) {
+          outTimes.push(extracted[0]);
+        }
+
+        // 3. 출근 처리: '내일', '낼', '모레' 등 미래를 언급한 출근 텍스트 방어
+        const cleanText = text.replace(/\s/g, '');
+        const isFutureIn = /(내일|낼|익일|모레).*?(출근|입실)/.test(cleanText);
+
+        // 출근 키워드가 있고, 미래를 언급한 것이 아닐 때만 실제 출근 로직 반영
+        if (hasInKeyword && !isFutureIn) {
           inTimes.push(...extracted);
+          
+          // 가장 먼저 남긴 유효한 출근 메시지의 시간을 실제 출근 시간으로 고정
           if (actualStartMin === null) {
             const kst = getKstObj(m.ts);
             actualStartMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
           }
+          // 본인이 직접 텍스트로 "9시 출근" 등을 언급한 경우 정정 시간으로 사용
           if (extracted.length > 1 && manualStartMin === null) {
             manualStartMin = extracted[1];
           }
         }
       }
-
+      
       inTimes.sort((a, b) => a - b);
       outTimes.sort((a, b) => a - b);
                   
