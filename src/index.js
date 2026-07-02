@@ -330,7 +330,7 @@ class SheetsClient {
 
 async function main() {
   console.log('========================================');
-  console.log('  Slack 출퇴근 스마트 로거 v25.0 (출퇴근 시간 분리 파싱 최적화 탑재)');
+  console.log('  Slack 출퇴근 스마트 로거 (초기화 및 증분 업데이트 일치 로직 탑재)');
   console.log('========================================\n');
 
   const sheets = new SheetsClient();
@@ -383,7 +383,7 @@ async function main() {
   if (needsFullReconcile) {
     console.log('🔄 [풀 스위퍼] 사원/캘린더 마스터 변경이 감지되었습니다. 과거 전체 데이터를 검증합니다...');
   } else {
-    console.log('✅ 마스터 데이터 변경 없음. 풀 스위퍼를 생략하고 최근 기록만 동기화합니다.');
+    console.log('✅ 마스터 데이터 변경 없음. 최근 기록을 동기화합니다.');
   }
 
   const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60;
@@ -411,8 +411,6 @@ async function main() {
   targetYearsSet.add(currentYear);
   const targetYears = Array.from(targetYearsSet).sort();
 
-
-  // 💡 [추가] 변동사항 시트 데이터를 로드하여 캐싱
   const adjData = {}; 
   if (!CONFIG.sheets.sheetNames.adjustments) CONFIG.sheets.sheetNames.adjustments = '변동사항';
 
@@ -633,6 +631,7 @@ async function main() {
       const rowIdx = currentExistingRows.findIndex(r => r && r[0] === date && (r[2] || '').trim() === member); 
       const row = rowIdx >= 0 ? currentExistingRows[rowIdx] : null;
 
+      // 💡 수동으로 정정/기록한 행은 무조건 보호 (업데이트 무시)
       if (row && row[12] && (
           row[12].includes('[슬랙수정]') || 
           row[12].includes('[슬랙신규]') || 
@@ -691,10 +690,8 @@ async function main() {
         const extracted = extractTimeFromText(m.text, m.ts, m.isMidnightShift);
         
         if (isOutMsg && !text.includes('출근')) {
-          // 💡 [핵심] 퇴근 메시지면 퇴근 배열에만 넣음 (출근 시간에 오염되지 않음)
           outTimes.push(...extracted);
         } else {
-          // 출근 메시지거나 모호한 경우 출근 배열에 넣음
           inTimes.push(...extracted);
           if (actualStartMin === null) {
             const kst = getKstObj(m.ts);
@@ -712,16 +709,13 @@ async function main() {
       const rawStartMin = inTimes.length > 0 ? inTimes[0] : null;
       let endMin = outTimes.length > 0 ? outTimes[outTimes.length - 1] : null;
       
-// 둘 다 출근 배열에 들어갔을 경우를 대비한 2차 퇴근시간 추출 (안전장치)
       if (endMin === null && inTimes.length > 1) {
         endMin = inTimes[inTimes.length - 1];
       }
 
-      // 💡 [핵심 수정 1] 근무제별 '인정 출근 시간(근무 시작 시간)' 분리 산정 로직
       let startMin = null;
       if (rawStartMin !== null) {
         if (workTypeKey === 'FLEXIBLE') {
-          // 유연근무제: 타각 시간이 매 시각 10분 이내면 내림(해당 시), 10분 초과면 올림(다음 시)
           const rem = rawStartMin % 60;
           if (rem <= 10) {
             startMin = Math.floor(rawStartMin / 60) * 60;
@@ -729,17 +723,15 @@ async function main() {
             startMin = Math.ceil(rawStartMin / 60) * 60;
           }
         } else {
-          // 고정/아르바이트: 기존 로직 유지 (가장 가까운 정각)
           startMin = snapToNearestHour(rawStartMin);
         }
       }
 
       if (typeof manualStartMin !== 'undefined' && manualStartMin !== null) actualStartMin = manualStartMin;
       
-      // 💡 [핵심 수정 2] 지각 판정 기준 시간 (FLEXIBLE은 보정된 정각 기준, FIXED는 실제 분 단위 기준)
       let latenessCheckMin = actualStartMin !== null ? actualStartMin : startMin;
       if (workTypeKey === 'FLEXIBLE' && startMin !== null) {
-        latenessCheckMin = startMin; // 유연근무제는 10분 단위로 올림/내림된 최종 기준 시간을 지각 판정에 사용
+        latenessCheckMin = startMin; 
       }
 
       if (startMin !== null && (workTypeKey === 'FIXED' || workTypeKey === 'PART_TIME' || workTypeKey === 'FLEXIBLE')) {
@@ -807,41 +799,44 @@ async function main() {
         toAppendByYear[yyyy].push(newRow); 
         currentExistingRows.push(newRow);
       } else {
-        // 💡 [핵심 방어 로직] 이미 기록된 과거 데이터는 슬랙 로봇이 함부로 덮어쓰지 못하게 보호!
-        const yesterdayStr = getYesterdayDateStr(todayStr);
-        const isRecent = (date === todayStr || date === yesterdayStr);
-        const hasNewCheckout = (!row[8] || row[8] === '-') && endMin !== null;
-
-        // 오늘/어제 기록도 아니고, 새롭게 추가할 퇴근 시간도 없다면 무시 (과거 데이터 원형 보존)
-        if (!isRecent && !hasNewCheckout) {
-          continue; 
-        }
-
+        // 💡 [수정됨] 초기 데이터 스윕과 점진적 업데이트 간의 결과 불일치 해결
+        // 수동 정정 태그가 없는 한, 슬랙 최신 분석 결과와 시트 내용이 다르다면 무조건 일치시킵니다.
         while (row.length < 13) row.push(''); 
 
-        // 💡 [해결책] "이미 있는 데이터는 냅두고, 업데이트(빈칸)되는 부분만 끼워넣기"
-        row[1] = dayName;
-        
-        // 상태, 근무제, 지각여부, 출근시간: 시트에 한 번이라도 기록이 되었다면 절대 덮어쓰지 않음!
-        if (!row[3] || row[3] === '-') row[3] = rawWorkType;
-        if (!row[4] || row[4] === '-' || row[4] === '결근') row[4] = status; // 억울한 결근일 때만 갱신
-        if (!row[5] || row[5] === '-') row[5] = analysis.lateness;           // 지각/정상 플리핑 원천 차단
-        if (!row[6] || row[6] === '-') row[6] = formatTimeFromMins(startMin);
-        if (!row[7] || row[7] === '-') row[7] = formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin);
-
-        // 퇴근시간 및 야근시간: 빈칸이었는데 슬랙에서 새로 찾은 경우에만 갱신 (이미 관리자가 적어뒀다면 보존)
+        const parsedStartStr = formatTimeFromMins(startMin);
+        const parsedActualStr = formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin);
         const parsedEndMinStr = formatTimeFromMins(endMin);
-        if ((!row[8] || row[8] === '-') && parsedEndMinStr !== '-') {
+        const newLeaveType = leaveStatus || autoLeaveType;
+
+        const isDataDifferent = (
+          row[1] !== dayName ||
+          row[3] !== rawWorkType ||
+          row[4] !== status ||
+          row[5] !== analysis.lateness ||
+          row[6] !== parsedStartStr ||
+          row[7] !== parsedActualStr ||
+          row[8] !== parsedEndMinStr ||
+          row[9] !== analysis.overtime ||
+          row[10] !== String(analysis.overtimeHours) ||
+          row[11] !== newLeaveType ||
+          row[12] !== note
+        );
+
+        if (isDataDifferent) {
+          row[1] = dayName;
+          row[3] = rawWorkType;
+          row[4] = status; 
+          row[5] = analysis.lateness;
+          row[6] = parsedStartStr;
+          row[7] = parsedActualStr;
           row[8] = parsedEndMinStr;
           row[9] = analysis.overtime;
           row[10] = String(analysis.overtimeHours);
+          row[11] = newLeaveType;
+          row[12] = note;
+
+          toUpdateByYear[yyyy].push({ range: `'${currentSheetName}'!B${rowIdx + 1}:M${rowIdx + 1}`, values: [row.slice(1, 13)] });
         }
-
-        // 휴가구분과 비고란 역시 빈칸일 때만 새롭게 채워넣음
-        if (!row[11] || row[11] === '-') row[11] = leaveStatus || autoLeaveType;
-        if (!row[12]) row[12] = note;
-
-        toUpdateByYear[yyyy].push({ range: `'${currentSheetName}'!B${rowIdx + 1}:M${rowIdx + 1}`, values: [row.slice(1, 13)] });
       }
     }
   }
