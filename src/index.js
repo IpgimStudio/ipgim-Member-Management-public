@@ -810,7 +810,7 @@ async function main() {
         // 💡 [핵심 방어 로직] 이미 기록된 과거 데이터는 슬랙 로봇이 함부로 덮어쓰지 못하게 보호!
         const yesterdayStr = getYesterdayDateStr(todayStr);
         const isRecent = (date === todayStr || date === yesterdayStr);
-        const hasNewCheckout = !row[8] && endMin !== null; // 기존 시트에 퇴근시간이 없었는데 새로 찾은 경우
+        const hasNewCheckout = (!row[8] || row[8] === '-') && endMin !== null;
 
         // 오늘/어제 기록도 아니고, 새롭게 추가할 퇴근 시간도 없다면 무시 (과거 데이터 원형 보존)
         if (!isRecent && !hasNewCheckout) {
@@ -818,11 +818,29 @@ async function main() {
         }
 
         while (row.length < 13) row.push(''); 
-        row[1] = dayName; row[3] = rawWorkType; row[4] = status; row[5] = analysis.lateness;
-        row[6] = formatTimeFromMins(startMin); 
-        row[7] = formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin); 
-        row[8] = formatTimeFromMins(endMin);
-        row[9] = analysis.overtime; row[10] = String(analysis.overtimeHours); row[11] = leaveStatus || autoLeaveType; row[12] = note;
+
+        // 💡 [해결책] "이미 있는 데이터는 냅두고, 업데이트(빈칸)되는 부분만 끼워넣기"
+        row[1] = dayName;
+        
+        // 상태, 근무제, 지각여부, 출근시간: 시트에 한 번이라도 기록이 되었다면 절대 덮어쓰지 않음!
+        if (!row[3] || row[3] === '-') row[3] = rawWorkType;
+        if (!row[4] || row[4] === '-' || row[4] === '결근') row[4] = status; // 억울한 결근일 때만 갱신
+        if (!row[5] || row[5] === '-') row[5] = analysis.lateness;           // 지각/정상 플리핑 원천 차단
+        if (!row[6] || row[6] === '-') row[6] = formatTimeFromMins(startMin);
+        if (!row[7] || row[7] === '-') row[7] = formatTimeFromMins(actualStartMin !== null ? actualStartMin : startMin);
+
+        // 퇴근시간 및 야근시간: 빈칸이었는데 슬랙에서 새로 찾은 경우에만 갱신 (이미 관리자가 적어뒀다면 보존)
+        const parsedEndMinStr = formatTimeFromMins(endMin);
+        if ((!row[8] || row[8] === '-') && parsedEndMinStr !== '-') {
+          row[8] = parsedEndMinStr;
+          row[9] = analysis.overtime;
+          row[10] = String(analysis.overtimeHours);
+        }
+
+        // 휴가구분과 비고란 역시 빈칸일 때만 새롭게 채워넣음
+        if (!row[11] || row[11] === '-') row[11] = leaveStatus || autoLeaveType;
+        if (!row[12]) row[12] = note;
+
         toUpdateByYear[yyyy].push({ range: `'${currentSheetName}'!B${rowIdx + 1}:M${rowIdx + 1}`, values: [row.slice(1, 13)] });
       }
     }
