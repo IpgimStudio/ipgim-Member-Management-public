@@ -807,6 +807,16 @@ async function main() {
         toAppendByYear[yyyy].push(newRow); 
         currentExistingRows.push(newRow);
       } else {
+        // 💡 [핵심 방어 로직] 이미 기록된 과거 데이터는 슬랙 로봇이 함부로 덮어쓰지 못하게 보호!
+        const yesterdayStr = getYesterdayDateStr(todayStr);
+        const isRecent = (date === todayStr || date === yesterdayStr);
+        const hasNewCheckout = !row[8] && endMin !== null; // 기존 시트에 퇴근시간이 없었는데 새로 찾은 경우
+
+        // 오늘/어제 기록도 아니고, 새롭게 추가할 퇴근 시간도 없다면 무시 (과거 데이터 원형 보존)
+        if (!isRecent && !hasNewCheckout) {
+          continue; 
+        }
+
         while (row.length < 13) row.push(''); 
         row[1] = dayName; row[3] = rawWorkType; row[4] = status; row[5] = analysis.lateness;
         row[6] = formatTimeFromMins(startMin); 
