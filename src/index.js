@@ -386,10 +386,11 @@ async function main() {
     console.log('✅ 마스터 데이터 변경 없음. 최근 기록을 동기화합니다.');
   }
 
-  const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60;
-  let oldest = isInitialRun ? '0' : String(Math.floor(Date.now() / 1000) - THIRTY_DAYS_SEC);
+// 💡 [수정됨] 슬라이딩 윈도우 경계선 잘림 방지 (시트 업데이트는 30일 기준이되, 수집은 35일치 안전 마진 스캔)
+  const SAFE_MARGIN_DAYS_SEC = 35 * 24 * 60 * 60;
+  let oldest = isInitialRun ? '0' : String(Math.floor(Date.now() / 1000) - SAFE_MARGIN_DAYS_SEC);
   const messages = await slack.fetchMessagesInRange(CONFIG.slack.channelId, oldest);
-
+  
   const sheetMetadata = await sheets.sheets.spreadsheets.get({ spreadsheetId: sheets.sheetId });
   const targetYearsSet = new Set();
   
