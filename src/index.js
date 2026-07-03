@@ -632,12 +632,12 @@ async function main() {
       const rowIdx = currentExistingRows.findIndex(r => r && r[0] === date && (r[2] || '').trim() === member); 
       const row = rowIdx >= 0 ? currentExistingRows[rowIdx] : null;
 
-      // 💡 수동으로 정정/기록한 행은 무조건 보호 (업데이트 무시)
       if (row && row[12] && (
           row[12].includes('[슬랙수정]') || 
           row[12].includes('[슬랙신규]') || 
           row[12].includes('[관리자정정]') ||
-          row[12].includes('[정정완료]')
+          row[12].includes('[정정완료]') ||
+          row[12].includes('[관리자삭제]') 
       )) {
         continue;
       }
