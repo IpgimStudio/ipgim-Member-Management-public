@@ -362,7 +362,10 @@ async function main() {
   }
 
   const masterMap = await sheets.getEmployeeMaster();
-  const currentMasterData = JSON.stringify(masterMap) + JSON.stringify(holidaysMap);
+  function stableStringify(obj) {
+    return JSON.stringify(obj, Object.keys(obj).sort());
+  }
+  const currentMasterData = stableStringify(masterMap) + stableStringify(holidaysMap);
   const currentHash = crypto.createHash('sha256').update(currentMasterData).digest('hex');
 
   await sheets.ensureSheet('시스템설정', ['설정명', '값', '설명']);

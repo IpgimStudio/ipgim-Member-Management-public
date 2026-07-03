@@ -1,13 +1,16 @@
 name: Slack Logger
 
 on:
-  workflow_dispatch: # 외부 스케줄러가 이 버튼을 1분마다 원격으로 누릅니다.
+  workflow_dispatch:
+    
+concurrency:
+  group: slack-logger-sync
+  cancel-in-progress: false
 
 jobs:
   fetch-and-log:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
