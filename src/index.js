@@ -165,11 +165,19 @@ function analyzeFlexible(startMin, endMin) {
   const maxStartLimit = 11 * 60; 
   let lateness = '정상';
   let targetEnd = 18 * 60; // fallback
-  if (startMin !== null) {
-    let effectiveStart = startMin < minStart ? minStart : startMin; 
-    lateness = startMin > maxStartLimit ? '지각' : '정상';
-    targetEnd = effectiveStart + (9 * 60);
-  }
+    if (startMin !== null) {
+        if (workTypeKey === 'FLEXIBLE') {
+          // 💡 유연출퇴근자: 8시 이전 출근 시 8시부터 근무 시작으로 산정
+          const EIGHT_AM = 8 * 60;
+          if (startMin < EIGHT_AM) startMin = EIGHT_AM;
+          if (latenessCheckMin < EIGHT_AM) latenessCheckMin = EIGHT_AM;
+        } else if (workTypeKey === 'FIXED' || workTypeKey === 'PART_TIME') {
+          // 고정/파트타임: 9시 이전 출근 시 9시부터 근무 시작으로 산정
+          const NINE_AM = 9 * 60;
+          if (startMin < NINE_AM) startMin = NINE_AM;
+          if (latenessCheckMin < NINE_AM) latenessCheckMin = NINE_AM;
+        }
+      }
   
   let overtime = '없음';
   let overtimeHours = 0;
