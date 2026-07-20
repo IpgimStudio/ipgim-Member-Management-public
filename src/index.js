@@ -165,19 +165,14 @@ function analyzeFlexible(startMin, endMin) {
   const maxStartLimit = 11 * 60; 
   let lateness = '정상';
   let targetEnd = 18 * 60; // fallback
-    if (startMin !== null) {
-        if (workTypeKey === 'FLEXIBLE') {
-          // 💡 유연출퇴근자: 8시 이전 출근 시 8시부터 근무 시작으로 산정
-          const EIGHT_AM = 8 * 60;
-          if (startMin < EIGHT_AM) startMin = EIGHT_AM;
-          if (latenessCheckMin < EIGHT_AM) latenessCheckMin = EIGHT_AM;
-        } else if (workTypeKey === 'FIXED' || workTypeKey === 'PART_TIME') {
-          // 고정/파트타임: 9시 이전 출근 시 9시부터 근무 시작으로 산정
-          const NINE_AM = 9 * 60;
-          if (startMin < NINE_AM) startMin = NINE_AM;
-          if (latenessCheckMin < NINE_AM) latenessCheckMin = NINE_AM;
-        }
-      }
+  if (startMin !== null) {
+    if (startMin > maxStartLimit) {
+      lateness = '지각';
+    }
+    // 8시 이전 출근은 8시 출근으로 간주하여 퇴근 시간(점심 포함 9시간) 계산
+    const effectiveStart = startMin < minStart ? minStart : startMin;
+    targetEnd = effectiveStart + 9 * 60; 
+  }
   
   let overtime = '없음';
   let overtimeHours = 0;
@@ -762,10 +757,18 @@ async function main() {
         latenessCheckMin = startMin; 
       }
 
-      if (startMin !== null && (workTypeKey === 'FIXED' || workTypeKey === 'PART_TIME' || workTypeKey === 'FLEXIBLE')) {
-        const NINE_AM = 9 * 60;
-        if (startMin < NINE_AM) startMin = NINE_AM;
-        if (latenessCheckMin < NINE_AM) latenessCheckMin = NINE_AM;
+      if (startMin !== null) {
+        if (workTypeKey === 'FLEXIBLE') {
+          // 💡 유연출퇴근자: 8시 이전 출근 시 8시부터 근무 시작으로 산정
+          const EIGHT_AM = 8 * 60;
+          if (startMin < EIGHT_AM) startMin = EIGHT_AM;
+          if (latenessCheckMin < EIGHT_AM) latenessCheckMin = EIGHT_AM;
+        } else if (workTypeKey === 'FIXED' || workTypeKey === 'PART_TIME') {
+          // 고정/파트타임: 9시 이전 출근 시 9시부터 근무 시작으로 산정
+          const NINE_AM = 9 * 60;
+          if (startMin < NINE_AM) startMin = NINE_AM;
+          if (latenessCheckMin < NINE_AM) latenessCheckMin = NINE_AM;
+        }
       }
 
       const hasClockOutKeyword = allText.includes('퇴근') || allText.includes('퇴실');
