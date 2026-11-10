@@ -1,30 +1,15 @@
-name: Slack Logger
+# =============================================================
+# [비활성화됨] Express 서버로 통합 완료 (2026-07)
+# GitHub Actions 대신 Express 서버 slack-bot.js가
+# Socket Mode로 실시간 메시지를 처리합니다.
+# =============================================================
+name: Slack Logger (DISABLED)
 
 on:
-  workflow_dispatch: # 외부 스케줄러가 이 버튼을 1분마다 원격으로 누릅니다.
+  workflow_dispatch: # 더 이상 사용되지 않음 (Express 서버로 대체)
 
 jobs:
-  fetch-and-log:
+  disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run Slack → Sheets logger
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-          GOOGLE_SERVICE_EMAIL: ${{ secrets.GOOGLE_SERVICE_EMAIL }}
-          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
-        run: node src/index.js
+      - run: echo "이 워크플로우는 비활성화되었습니다. Express 서버로 통합됨."
